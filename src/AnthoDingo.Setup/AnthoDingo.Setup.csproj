@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AnthoDingo.Setup</RootNamespace>
+    <AssemblyName>AnthoDingo.Setup</AssemblyName>
+    <PackageId>AnthoDingo.Setup</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>AnthoDingo</Authors>
+    <Description>Middleware d'installation premier démarrage (file-based) pour ASP.NET Core, avec page /setup intégrée et assets Bootstrap embarqués (hors-ligne). Agnostique du DbContext et du modèle utilisateur via ISetupInitializer.</Description>
+    <PackageProjectUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+  </ItemGroup>
+
+  <!-- Assets embarqués (hors-ligne) servis par le middleware sous /setup/_assets/ -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/bootstrap.min.css"           LogicalName="bootstrap.min.css" />
+    <EmbeddedResource Include="Assets/bootstrap-icons.min.css"     LogicalName="bootstrap-icons.min.css" />
+    <EmbeddedResource Include="Assets/fonts/bootstrap-icons.woff2" LogicalName="fonts/bootstrap-icons.woff2" />
+    <EmbeddedResource Include="Assets/fonts/bootstrap-icons.woff"  LogicalName="fonts/bootstrap-icons.woff" />
+  </ItemGroup>
+
+</Project>

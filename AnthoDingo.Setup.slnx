@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AnthoDingo.Setup/AnthoDingo.Setup.csproj" />
+  </Folder>
+</Solution>
