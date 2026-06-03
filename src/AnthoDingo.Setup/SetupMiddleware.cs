@@ -52,7 +52,10 @@ public sealed class SetupMiddleware(
             if (HttpMethods.IsPost(ctx.Request.Method))
                 await HandleInstallAsync(ctx, setup, lifetime, logger);
             else
-                await WriteHtmlAsync(ctx, SetupPage.RenderForm(appName, null, null));
+            {
+                setup.PendingConnectionString = null;   // nouvelle session → repart à l'étape 1
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null));
+            }
             return;
         }
 
@@ -67,61 +70,110 @@ public sealed class SetupMiddleware(
         ctx.Response.Redirect(_opts.SetupPath);
     }
 
-    // ── Traitement du formulaire d'installation (page intégrée) ───────────────
+    // ── Traitement du wizard multi-étapes (page intégrée) ─────────────────────
 
     private async Task HandleInstallAsync(
         HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger)
     {
         IFormCollection form = await ctx.Request.ReadFormAsync();
         Dictionary<string, string> values = form.ToDictionary(f => f.Key, f => f.Value.ToString());
+        string step = form["step"].ToString();
 
-        string  server     = form["server"].ToString().Trim();
-        string  database   = form["database"].ToString().Trim();
-        bool    windowsAuth = form["windowsAuth"] == "on";
-        string? sqlUser    = form["sqlUser"];
-        string? sqlPassword = form["sqlPassword"];
-        bool    trustCert  = form["trustCert"] == "on";
-
-        string  email      = form["adminEmail"].ToString().Trim();
-        string? displayName = form["adminDisplayName"];
-        string  password   = form["adminPassword"].ToString();
-        string  confirm    = form["adminConfirm"].ToString();
-
-        async Task FailAsync(string message)
+        switch (step)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderForm(appName, message, values));
+            case "1": await Step1ConnectionAsync(ctx, setup, form, values); break;
+            case "2": await Step2InitDbAsync(ctx, setup); break;
+            case "3": await Step3AdminAsync(ctx, setup, lifetime, logger, form, values); break;
+            default:  await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null)); break;
+        }
+    }
+
+    private async Task Step1ConnectionAsync(
+        HttpContext ctx, SetupService setup, IFormCollection form, Dictionary<string, string> values)
+    {
+        string  server      = form["server"].ToString().Trim();
+        string  database    = form["database"].ToString().Trim();
+        bool    windowsAuth = form["windowsAuth"] == "on";
+        string? sqlUser     = form["sqlUser"];
+        string? sqlPassword = form["sqlPassword"];
+        bool    trustCert   = form["trustCert"] == "on";
+
+        if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur et le nom de la base sont obligatoires.", values));
+            return;
         }
 
-        // Validation
-        if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
-        { await FailAsync("Le serveur et le nom de la base sont obligatoires."); return; }
-        if (string.IsNullOrWhiteSpace(email))
-        { await FailAsync("L'email administrateur est obligatoire."); return; }
-        if (password.Length < 8)
-        { await FailAsync("Le mot de passe doit faire au moins 8 caractères."); return; }
-        if (password != confirm)
-        { await FailAsync("Les mots de passe ne correspondent pas."); return; }
-
-        string connectionString = setup.BuildSqlConnectionString(
-            server, database, windowsAuth, sqlUser, sqlPassword, trustCert);
-
-        // 1) Test de connexion
+        string connectionString = setup.BuildSqlConnectionString(server, database, windowsAuth, sqlUser, sqlPassword, trustCert);
         string? err = await setup.TestConnectionAsync(connectionString, ctx.RequestAborted);
-        if (err is not null) { await FailAsync($"Connexion échouée : {err}"); return; }
+        if (err is not null)
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, $"Connexion echouee : {err}", values));
+            return;
+        }
 
-        // 2) Initialisation de la base
-        try { await setup.InitializeDatabaseAsync(connectionString, ctx.RequestAborted); }
-        catch (Exception ex) { await FailAsync($"Initialisation échouée : {ex.Message}"); return; }
+        setup.PendingConnectionString = connectionString;       // conservé pour les étapes 2/3
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null));
+    }
 
-        // 3) Création de l'admin
-        try { await setup.CreateAdminAsync(connectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted); }
-        catch (Exception ex) { await FailAsync($"Création du compte échouée : {ex.Message}"); return; }
+    private async Task Step2InitDbAsync(HttpContext ctx, SetupService setup)
+    {
+        if (setup.PendingConnectionString is null)
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null));
+            return;
+        }
 
-        // 4) Finalisation + redémarrage différé
-        setup.CompleteSetup(connectionString);
+        try
+        {
+            await setup.InitializeDatabaseAsync(setup.PendingConnectionString, ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}"));
+            return;
+        }
+
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null));
+    }
+
+    private async Task Step3AdminAsync(
+        HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
+        IFormCollection form, Dictionary<string, string> values)
+    {
+        if (setup.PendingConnectionString is null)
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null));
+            return;
+        }
+
+        string  email       = form["adminEmail"].ToString().Trim();
+        string? displayName = form["adminDisplayName"];
+        string  password    = form["adminPassword"].ToString();
+        string  confirm     = form["adminConfirm"].ToString();
+
+        if (string.IsNullOrWhiteSpace(email))
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values)); return; }
+        if (password.Length < 8)
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values)); return; }
+        if (password != confirm)
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values)); return; }
+
+        try
+        {
+            await setup.CreateAdminAsync(setup.PendingConnectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values));
+            return;
+        }
+
+        setup.CompleteSetup(setup.PendingConnectionString);
+        setup.PendingConnectionString = null;
         await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName));
 
-        logger.LogInformation("[Setup] Installation terminée — redémarrage de l'application.");
+        logger.LogInformation("[Setup] Installation terminee — redemarrage de l'application.");
         _ = Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(2));

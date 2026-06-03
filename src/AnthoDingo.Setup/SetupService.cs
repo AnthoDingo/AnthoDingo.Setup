@@ -26,6 +26,12 @@ public sealed class SetupService(
     private readonly SetupOptions _opts = options.Value;
     private bool? _cachedComplete;
 
+    /// <summary>
+    /// Chaîne de connexion validée à l'étape 1, conservée en mémoire entre les
+    /// étapes du wizard (évite de transporter le mot de passe dans le HTML).
+    /// </summary>
+    public string? PendingConnectionString { get; set; }
+
     // ── Détection ─────────────────────────────────────────────────────────────
 
     /// <summary>
