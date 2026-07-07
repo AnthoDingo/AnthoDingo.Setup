@@ -101,6 +101,13 @@ internal static class SetupPage
               Tester la connexion <i class="bi bi-arrow-right ms-1"></i>
             </button>
           </form>
+        """);
+        // Bloc separe, non interpole (pas de "$" devant """) : les accolades JS
+        // ci-dessous restent du texte litteral au lieu d'etre lues comme des
+        // trous d'interpolation C# (ce qui provoquait "Unexpected token 'win'"
+        // et des erreurs "Too many characters in character literal" sur les
+        // chaines JS entre quotes simples).
+        b.Append("""
           <script>
             (function () {
               var win = document.getElementById('windowsAuth'), creds = document.getElementById('sqlCreds');
