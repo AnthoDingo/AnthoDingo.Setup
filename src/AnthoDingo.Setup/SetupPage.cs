@@ -51,16 +51,41 @@ internal static class SetupPage
 </html>
 """;
 
-    // ── Étape 1 : connexion SQL ───────────────────────────────────────────────
+    // ── Étape 1 : connexion base de données ────────────────────────────────────
 
-    public static string RenderStep1(string appName, string? error, IDictionary<string, string>? values)
+    public static string RenderStep1(
+        string appName, string? error, IDictionary<string, string>? values, IReadOnlyList<DbProvider> allowedProviders)
     {
+        if (allowedProviders.Count == 0) allowedProviders = [DbProvider.SqlServer];
+
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
         bool isPost = values is not null;
-        bool win   = !isPost || V("windowsAuth") == "on";
-        bool trust = !isPost || V("trustCert") == "on";
-        string server   = V("server")   is { Length: > 0 } sv ? sv : "localhost";
-        string database = V("database") is { Length: > 0 } db ? db : Enc(appName);
+
+        string selected = V("dbProvider") is { Length: > 0 } sp && Enum.TryParse(sp, ignoreCase: true, out DbProvider parsed) && allowedProviders.Contains(parsed)
+            ? parsed.ToString()
+            : allowedProviders[0].ToString();
+
+        // SQL Server
+        bool   ssWin   = !isPost || V("ss_windowsAuth") == "on";
+        bool   ssTrust = !isPost || V("ss_trustCert") == "on";
+        string ssServer   = V("ss_server")   is { Length: > 0 } ssv ? ssv : "localhost";
+        string ssDatabase = V("ss_database") is { Length: > 0 } ssd ? ssd : Enc(appName);
+
+        // MySQL / MariaDB
+        bool   myTrust = !isPost || V("my_trustCert") == "on";
+        string myServer   = V("my_server")   is { Length: > 0 } msv ? msv : "localhost";
+        string myPort     = V("my_port")     is { Length: > 0 } mpv ? mpv : "3306";
+        string myDatabase = V("my_database") is { Length: > 0 } mdv ? mdv : Enc(appName);
+
+        // PostgreSQL
+        bool   pgTrust = !isPost || V("pg_trustCert") == "on";
+        string pgServer   = V("pg_server")   is { Length: > 0 } psv ? psv : "localhost";
+        string pgPort     = V("pg_port")     is { Length: > 0 } ppv ? ppv : "5432";
+        string pgDatabase = V("pg_database") is { Length: > 0 } pdv ? pdv : Enc(appName);
+
+        // SQLite
+        string sqDefaultFile = "App_Data/" + Enc(appName).ToLowerInvariant().Replace(' ', '-') + ".db";
+        string sqFile = V("sq_file") is { Length: > 0 } sqv ? sqv : sqDefaultFile;
 
         StringBuilder b = new StringBuilder();
         b.Append(StepHeader(appName, 1));
@@ -68,36 +93,137 @@ internal static class SetupPage
         b.Append($"""
           <form method="post" action="/setup">
             <input type="hidden" name="step" value="1" />
-            <h2 class="text-uppercase text-secondary fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em">
-              <i class="bi bi-database me-1"></i>Base de donnees SQL Server
-            </h2>
             <div class="mb-3">
-              <label class="form-label">Serveur</label>
-              <input type="text" class="form-control" name="server" value="{server}" placeholder="localhost\SQLEXPRESS" />
+              <label class="form-label text-uppercase text-secondary fw-semibold" style="font-size:.75rem;letter-spacing:.05em">
+                <i class="bi bi-database me-1"></i>Type de base de donnees
+              </label>
+              <select class="form-select" id="dbProvider" name="dbProvider">
+                {ProviderOptions(allowedProviders, selected)}
+              </select>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Nom de la base</label>
-              <input type="text" class="form-control" name="database" value="{database}" />
-            </div>
-            <div class="form-check mb-2">
-              <input type="checkbox" class="form-check-input" id="windowsAuth" name="windowsAuth" {(win ? "checked" : "")} />
-              <label class="form-check-label" for="windowsAuth">Authentification Windows</label>
-            </div>
-            <div id="sqlCreds" class="row g-2 mb-2">
-              <div class="col">
-                <label class="form-label">Utilisateur SQL</label>
-                <input type="text" class="form-control" name="sqlUser" value="{V("sqlUser")}" />
+        """);
+
+        if (allowedProviders.Contains(DbProvider.SqlServer))
+        {
+            b.Append($"""
+              <div id="panel-SqlServer" class="db-panel">
+                <div class="mb-3">
+                  <label class="form-label">Serveur</label>
+                  <input type="text" class="form-control" name="ss_server" value="{ssServer}" placeholder="localhost\SQLEXPRESS" />
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Nom de la base</label>
+                  <input type="text" class="form-control" name="ss_database" value="{ssDatabase}" />
+                </div>
+                <div class="form-check mb-2">
+                  <input type="checkbox" class="form-check-input" id="ss_windowsAuth" name="ss_windowsAuth" {(ssWin ? "checked" : "")} />
+                  <label class="form-check-label" for="ss_windowsAuth">Authentification Windows</label>
+                </div>
+                <div id="sqlCreds" class="row g-2 mb-2">
+                  <div class="col">
+                    <label class="form-label">Utilisateur SQL</label>
+                    <input type="text" class="form-control" name="ss_user" value="{V("ss_user")}" />
+                  </div>
+                  <div class="col">
+                    <label class="form-label">Mot de passe SQL</label>
+                    <input type="password" class="form-control" name="ss_password" />
+                  </div>
+                </div>
+                <div class="form-check mb-2">
+                  <input type="checkbox" class="form-check-input" id="ss_trustCert" name="ss_trustCert" {(ssTrust ? "checked" : "")} />
+                  <label class="form-check-label" for="ss_trustCert">TrustServerCertificate (certificat auto-signe)</label>
+                </div>
               </div>
-              <div class="col">
-                <label class="form-label">Mot de passe SQL</label>
-                <input type="password" class="form-control" name="sqlPassword" />
+            """);
+        }
+
+        if (allowedProviders.Contains(DbProvider.MySql))
+        {
+            b.Append($"""
+              <div id="panel-MySql" class="db-panel">
+                <div class="row g-2 mb-3">
+                  <div class="col-8">
+                    <label class="form-label">Serveur</label>
+                    <input type="text" class="form-control" name="my_server" value="{myServer}" placeholder="localhost" />
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-control" name="my_port" value="{myPort}" />
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Nom de la base</label>
+                  <input type="text" class="form-control" name="my_database" value="{myDatabase}" />
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col">
+                    <label class="form-label">Utilisateur</label>
+                    <input type="text" class="form-control" name="my_user" value="{V("my_user")}" />
+                  </div>
+                  <div class="col">
+                    <label class="form-label">Mot de passe</label>
+                    <input type="password" class="form-control" name="my_password" />
+                  </div>
+                </div>
+                <div class="form-check mb-2">
+                  <input type="checkbox" class="form-check-input" id="my_trustCert" name="my_trustCert" {(myTrust ? "checked" : "")} />
+                  <label class="form-check-label" for="my_trustCert">Ignorer la verification du certificat SSL</label>
+                </div>
               </div>
-            </div>
-            <div class="form-check mb-4">
-              <input type="checkbox" class="form-check-input" id="trustCert" name="trustCert" {(trust ? "checked" : "")} />
-              <label class="form-check-label" for="trustCert">TrustServerCertificate (certificat auto-signe)</label>
-            </div>
-            <button type="submit" class="btn btn-primary w-100 py-2">
+            """);
+        }
+
+        if (allowedProviders.Contains(DbProvider.Postgres))
+        {
+            b.Append($"""
+              <div id="panel-Postgres" class="db-panel">
+                <div class="row g-2 mb-3">
+                  <div class="col-8">
+                    <label class="form-label">Serveur</label>
+                    <input type="text" class="form-control" name="pg_server" value="{pgServer}" placeholder="localhost" />
+                  </div>
+                  <div class="col-4">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-control" name="pg_port" value="{pgPort}" />
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label">Nom de la base</label>
+                  <input type="text" class="form-control" name="pg_database" value="{pgDatabase}" />
+                </div>
+                <div class="row g-2 mb-2">
+                  <div class="col">
+                    <label class="form-label">Utilisateur</label>
+                    <input type="text" class="form-control" name="pg_user" value="{V("pg_user")}" />
+                  </div>
+                  <div class="col">
+                    <label class="form-label">Mot de passe</label>
+                    <input type="password" class="form-control" name="pg_password" />
+                  </div>
+                </div>
+                <div class="form-check mb-2">
+                  <input type="checkbox" class="form-check-input" id="pg_trustCert" name="pg_trustCert" {(pgTrust ? "checked" : "")} />
+                  <label class="form-check-label" for="pg_trustCert">Ignorer la verification du certificat SSL</label>
+                </div>
+              </div>
+            """);
+        }
+
+        if (allowedProviders.Contains(DbProvider.Sqlite))
+        {
+            b.Append($"""
+              <div id="panel-Sqlite" class="db-panel">
+                <div class="mb-3">
+                  <label class="form-label">Fichier de base de donnees</label>
+                  <input type="text" class="form-control" name="sq_file" value="{sqFile}" placeholder="App_Data/app.db" />
+                  <div class="form-text">Chemin relatif au dossier de l'application, ou chemin absolu. Le fichier et son dossier sont crees automatiquement.</div>
+                </div>
+              </div>
+            """);
+        }
+
+        b.Append("""
+            <button type="submit" class="btn btn-primary w-100 py-2 mt-2">
               Tester la connexion <i class="bi bi-arrow-right ms-1"></i>
             </button>
           </form>
@@ -110,7 +236,15 @@ internal static class SetupPage
         b.Append("""
           <script>
             (function () {
-              var win = document.getElementById('windowsAuth'), creds = document.getElementById('sqlCreds');
+              var sel = document.getElementById('dbProvider'), panels = document.querySelectorAll('.db-panel');
+              function syncPanels() {
+                for (var i = 0; i < panels.length; i++) {
+                  panels[i].style.display = (panels[i].id === 'panel-' + sel.value) ? '' : 'none';
+                }
+              }
+              if (sel) { sel.addEventListener('change', syncPanels); syncPanels(); }
+
+              var win = document.getElementById('ss_windowsAuth'), creds = document.getElementById('sqlCreds');
               if (win && creds) { var t = function(){ creds.style.display = win.checked ? 'none':'block'; };
                 win.addEventListener('change', t); t(); }
             })();
@@ -119,16 +253,37 @@ internal static class SetupPage
         return Wrap(appName, b.ToString());
     }
 
+    private static string ProviderOptions(IReadOnlyList<DbProvider> allowed, string selected)
+    {
+        (DbProvider Provider, string Label)[] all =
+        [
+            (DbProvider.SqlServer, "SQL Server"),
+            (DbProvider.MySql,     "MySQL / MariaDB"),
+            (DbProvider.Postgres,  "PostgreSQL"),
+            (DbProvider.Sqlite,    "SQLite (fichier local)")
+        ];
+
+        StringBuilder s = new StringBuilder();
+        foreach ((DbProvider provider, string label) in all)
+        {
+            if (!allowed.Contains(provider)) continue;
+            string value = provider.ToString();
+            string sel   = value == selected ? " selected" : "";
+            s.Append($"""<option value="{value}"{sel}>{label}</option>""");
+        }
+        return s.ToString();
+    }
+
     // ── Étape 2 : initialisation de la base ───────────────────────────────────
 
-    public static string RenderStep2(string appName, string? error)
+    public static string RenderStep2(string appName, string? error, DbProvider provider)
     {
         StringBuilder b = new StringBuilder();
         b.Append(StepHeader(appName, 2));
         b.Append(ErrorBlock(error));
-        b.Append("""
+        b.Append($"""
           <div class="alert alert-success d-flex align-items-center py-2">
-            <i class="bi bi-check-circle-fill me-2"></i><div>Connexion au serveur réussie.</div>
+            <i class="bi bi-check-circle-fill me-2"></i><div>Connexion {Enc(ProviderLabel(provider))} reussie.</div>
           </div>
           <p class="text-secondary">Les migrations et les données de référence vont être appliquées à la base.</p>
           <form method="post" action="/setup">
@@ -140,6 +295,15 @@ internal static class SetupPage
         """);
         return Wrap(appName, b.ToString());
     }
+
+    private static string ProviderLabel(DbProvider provider) => provider switch
+    {
+        DbProvider.SqlServer => "SQL Server",
+        DbProvider.MySql     => "MySQL/MariaDB",
+        DbProvider.Postgres  => "PostgreSQL",
+        DbProvider.Sqlite    => "SQLite",
+        _ => provider.ToString()
+    };
 
     // ── Étape 3 : compte administrateur ───────────────────────────────────────
 

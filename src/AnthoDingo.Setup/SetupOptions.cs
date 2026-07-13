@@ -41,4 +41,18 @@ public sealed class SetupOptions
         "/signin-oidc",
         "/signin-okta"
     ];
+
+    /// <summary>
+    /// Types de base de données proposés à l'étape 1 de l'assistant. Par défaut,
+    /// les quatre types pris en charge sont proposés ; l'application hôte peut
+    /// restreindre cette liste (p. ex. <c>[DbProvider.Postgres]</c> pour n'autoriser
+    /// que PostgreSQL). Le premier élément de la liste est présélectionné.
+    /// </summary>
+    public List<DbProvider> AllowedProviders { get; set; } =
+    [
+        DbProvider.SqlServer,
+        DbProvider.MySql,
+        DbProvider.Postgres,
+        DbProvider.Sqlite
+    ];
 }

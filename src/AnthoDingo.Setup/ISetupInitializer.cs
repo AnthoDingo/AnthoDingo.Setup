@@ -12,16 +12,17 @@ public sealed record AdminAccount(string UserName, string Password, string? Disp
 /// l'initialisation de la base (migrations / seed) et la création du premier
 /// compte administrateur.
 ///
-/// La bibliothèque appelle ces méthodes avec la chaîne de connexion validée
-/// par l'assistant — l'implémentation doit donc créer son DbContext à partir
-/// de cette chaîne (et non via l'injection de dépendances), car la
-/// configuration définitive n'est pas encore chargée à ce stade.
+/// La bibliothèque appelle ces méthodes avec le <see cref="DbProvider"/> choisi
+/// et la chaîne de connexion validée par l'assistant — l'implémentation doit
+/// donc créer son DbContext à partir de ces deux valeurs (et non via
+/// l'injection de dépendances), car la configuration définitive n'est pas
+/// encore chargée à ce stade.
 /// </summary>
 public interface ISetupInitializer
 {
     /// <summary>Applique les migrations (ou crée le schéma) et amorce les données de référence.</summary>
-    Task InitializeDatabaseAsync(string connectionString, CancellationToken ct = default);
+    Task InitializeDatabaseAsync(DbProvider provider, string connectionString, CancellationToken ct = default);
 
     /// <summary>Crée le premier compte administrateur.</summary>
-    Task CreateAdminAsync(string connectionString, AdminAccount admin, CancellationToken ct = default);
+    Task CreateAdminAsync(DbProvider provider, string connectionString, AdminAccount admin, CancellationToken ct = default);
 }

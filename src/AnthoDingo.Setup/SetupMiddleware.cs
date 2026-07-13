@@ -54,7 +54,8 @@ public sealed class SetupMiddleware(
             else
             {
                 setup.PendingConnectionString = null;   // nouvelle session → repart à l'étape 1
-                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null));
+                setup.PendingProvider = null;
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders));
             }
             return;
         }
@@ -84,53 +85,113 @@ public sealed class SetupMiddleware(
             case "1": await Step1ConnectionAsync(ctx, setup, form, values); break;
             case "2": await Step2InitDbAsync(ctx, setup); break;
             case "3": await Step3AdminAsync(ctx, setup, lifetime, logger, form, values); break;
-            default:  await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null)); break;
+            default:  await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders)); break;
         }
     }
 
     private async Task Step1ConnectionAsync(
         HttpContext ctx, SetupService setup, IFormCollection form, Dictionary<string, string> values)
     {
-        string  server      = form["server"].ToString().Trim();
-        string  database    = form["database"].ToString().Trim();
-        bool    windowsAuth = form["windowsAuth"] == "on";
-        string? sqlUser     = form["sqlUser"];
-        string? sqlPassword = form["sqlPassword"];
-        bool    trustCert   = form["trustCert"] == "on";
+        if (!Enum.TryParse(form["dbProvider"], ignoreCase: true, out DbProvider provider) || !_opts.AllowedProviders.Contains(provider))
+            provider = _opts.AllowedProviders.Count > 0 ? _opts.AllowedProviders[0] : DbProvider.SqlServer;
 
-        if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
+        string connectionString;
+        switch (provider)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur et le nom de la base sont obligatoires.", values));
-            return;
+            case DbProvider.SqlServer:
+            {
+                string  server      = form["ss_server"].ToString().Trim();
+                string  database    = form["ss_database"].ToString().Trim();
+                bool    windowsAuth = form["ss_windowsAuth"] == "on";
+                string? user        = form["ss_user"];
+                string? password    = form["ss_password"];
+                bool    trustCert   = form["ss_trustCert"] == "on";
+
+                if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
+                {
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur et le nom de la base sont obligatoires.", values, _opts.AllowedProviders));
+                    return;
+                }
+                connectionString = setup.BuildSqlConnectionString(server, database, windowsAuth, user, password, trustCert);
+                break;
+            }
+            case DbProvider.MySql:
+            {
+                string  server    = form["my_server"].ToString().Trim();
+                string  database  = form["my_database"].ToString().Trim();
+                string? user      = form["my_user"];
+                string? password  = form["my_password"];
+                bool    trustCert = form["my_trustCert"] == "on";
+                if (!uint.TryParse(form["my_port"], out uint port) || port == 0) port = 3306;
+
+                if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
+                {
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders));
+                    return;
+                }
+                connectionString = setup.BuildMySqlConnectionString(server, port, database, user!, password, trustCert);
+                break;
+            }
+            case DbProvider.Postgres:
+            {
+                string  server    = form["pg_server"].ToString().Trim();
+                string  database  = form["pg_database"].ToString().Trim();
+                string? user      = form["pg_user"];
+                string? password  = form["pg_password"];
+                bool    trustCert = form["pg_trustCert"] == "on";
+                if (!int.TryParse(form["pg_port"], out int port) || port <= 0) port = 5432;
+
+                if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
+                {
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders));
+                    return;
+                }
+                connectionString = setup.BuildPostgresConnectionString(server, port, database, user!, password, trustCert);
+                break;
+            }
+            case DbProvider.Sqlite:
+            {
+                string file = form["sq_file"].ToString().Trim();
+                if (string.IsNullOrWhiteSpace(file))
+                {
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le chemin du fichier SQLite est obligatoire.", values, _opts.AllowedProviders));
+                    return;
+                }
+                connectionString = setup.BuildSqliteConnectionString(file);
+                break;
+            }
+            default:
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Type de base de donnees invalide.", values, _opts.AllowedProviders));
+                return;
         }
 
-        string connectionString = setup.BuildSqlConnectionString(server, database, windowsAuth, sqlUser, sqlPassword, trustCert);
-        string? err = await setup.TestConnectionAsync(connectionString, ctx.RequestAborted);
+        string? err = await setup.TestConnectionAsync(provider, connectionString, ctx.RequestAborted);
         if (err is not null)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, $"Connexion echouee : {err}", values));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, $"Connexion echouee : {err}", values, _opts.AllowedProviders));
             return;
         }
 
-        setup.PendingConnectionString = connectionString;       // conservé pour les étapes 2/3
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null));
+        setup.PendingProvider         = provider;                // conservés pour les étapes 2/3
+        setup.PendingConnectionString = connectionString;
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null, provider));
     }
 
     private async Task Step2InitDbAsync(HttpContext ctx, SetupService setup)
     {
-        if (setup.PendingConnectionString is null)
+        if (setup.PendingConnectionString is null || setup.PendingProvider is null)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
             return;
         }
 
         try
         {
-            await setup.InitializeDatabaseAsync(setup.PendingConnectionString, ctx.RequestAborted);
+            await setup.InitializeDatabaseAsync(setup.PendingProvider.Value, setup.PendingConnectionString, ctx.RequestAborted);
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}"));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}", setup.PendingProvider.Value));
             return;
         }
 
@@ -141,9 +202,9 @@ public sealed class SetupMiddleware(
         HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
         IFormCollection form, Dictionary<string, string> values)
     {
-        if (setup.PendingConnectionString is null)
+        if (setup.PendingConnectionString is null || setup.PendingProvider is null)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
             return;
         }
 
@@ -159,9 +220,11 @@ public sealed class SetupMiddleware(
         if (password != confirm)
         { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values)); return; }
 
+        DbProvider provider = setup.PendingProvider.Value;
+
         try
         {
-            await setup.CreateAdminAsync(setup.PendingConnectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted);
+            await setup.CreateAdminAsync(provider, setup.PendingConnectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted);
         }
         catch (Exception ex)
         {
@@ -169,8 +232,9 @@ public sealed class SetupMiddleware(
             return;
         }
 
-        setup.CompleteSetup(setup.PendingConnectionString);
+        setup.CompleteSetup(provider, setup.PendingConnectionString);
         setup.PendingConnectionString = null;
+        setup.PendingProvider = null;
         await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName));
 
         logger.LogInformation("[Setup] Installation terminee — redemarrage de l'application.");

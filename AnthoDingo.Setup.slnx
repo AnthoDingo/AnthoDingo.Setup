@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/AnthoDingo.Setup/AnthoDingo.Setup.csproj" />
+    <Project Path="src/AnthoDingo.Setup.Example/AnthoDingo.Setup.Example.csproj" />
   </Folder>
 </Solution>
