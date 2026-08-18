@@ -53,8 +53,13 @@ public sealed class SetupMiddleware(
                 await HandleInstallAsync(ctx, setup, lifetime, logger);
             else
             {
-                setup.PendingConnectionString = null;   // nouvelle session → repart à l'étape 1
-                setup.PendingProvider = null;
+                // Un GET vers /setup ne remet plus à zéro d'état serveur : depuis
+                // que la connexion validée à l'étape 1 voyage dans un champ caché
+                // chiffré (voir SetupService.ProtectPendingState), il n'y a plus
+                // rien à réinitialiser ici. Un simple rechargement de la page /
+                // une sonde de monitoring / plusieurs workers ne cassent plus le
+                // wizard en cours (voir historique : "Session expiree" causé par
+                // un état conservé sur ce singleton et effacé par n'importe quel GET).
                 await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders));
             }
             return;
@@ -83,7 +88,7 @@ public sealed class SetupMiddleware(
         switch (step)
         {
             case "1": await Step1ConnectionAsync(ctx, setup, form, values); break;
-            case "2": await Step2InitDbAsync(ctx, setup); break;
+            case "2": await Step2InitDbAsync(ctx, setup, form); break;
             case "3": await Step3AdminAsync(ctx, setup, lifetime, logger, form, values); break;
             default:  await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders)); break;
         }
@@ -172,14 +177,18 @@ public sealed class SetupMiddleware(
             return;
         }
 
-        setup.PendingProvider         = provider;                // conservés pour les étapes 2/3
-        setup.PendingConnectionString = connectionString;
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null, provider));
+        // Chiffré dans un champ caché plutôt que conservé sur ce singleton : voir
+        // SetupService.ProtectPendingState — survit à un redémarrage/recyclage du
+        // process et fonctionne même si l'étape suivante atterrit sur un autre
+        // worker process (IIS Web Garden, plusieurs instances derrière un proxy).
+        string pendingStateToken = setup.ProtectPendingState(provider, connectionString);
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null, provider, pendingStateToken));
     }
 
-    private async Task Step2InitDbAsync(HttpContext ctx, SetupService setup)
+    private async Task Step2InitDbAsync(HttpContext ctx, SetupService setup, IFormCollection form)
     {
-        if (setup.PendingConnectionString is null || setup.PendingProvider is null)
+        string? pendingStateToken = form["pendingState"];
+        if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
             await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
             return;
@@ -187,22 +196,23 @@ public sealed class SetupMiddleware(
 
         try
         {
-            await setup.InitializeDatabaseAsync(setup.PendingProvider.Value, setup.PendingConnectionString, ctx.RequestAborted);
+            await setup.InitializeDatabaseAsync(provider, connectionString, ctx.RequestAborted);
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}", setup.PendingProvider.Value));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}", provider, pendingStateToken!));
             return;
         }
 
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null));
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null, pendingStateToken!));
     }
 
     private async Task Step3AdminAsync(
         HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
         IFormCollection form, Dictionary<string, string> values)
     {
-        if (setup.PendingConnectionString is null || setup.PendingProvider is null)
+        string? pendingStateToken = form["pendingState"];
+        if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
             await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
             return;
@@ -214,27 +224,23 @@ public sealed class SetupMiddleware(
         string  confirm     = form["adminConfirm"].ToString();
 
         if (string.IsNullOrWhiteSpace(email))
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values, pendingStateToken!)); return; }
         if (password.Length < 8)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values, pendingStateToken!)); return; }
         if (password != confirm)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values)); return; }
-
-        DbProvider provider = setup.PendingProvider.Value;
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values, pendingStateToken!)); return; }
 
         try
         {
-            await setup.CreateAdminAsync(provider, setup.PendingConnectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted);
+            await setup.CreateAdminAsync(provider, connectionString, new AdminAccount(email, password, displayName), ctx.RequestAborted);
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values, pendingStateToken!));
             return;
         }
 
-        setup.CompleteSetup(provider, setup.PendingConnectionString);
-        setup.PendingConnectionString = null;
-        setup.PendingProvider = null;
+        setup.CompleteSetup(provider, connectionString);
         await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName));
 
         logger.LogInformation("[Setup] Installation terminee — redemarrage de l'application.");

@@ -20,6 +20,12 @@ public static class SetupExtensions
             services.AddOptions<SetupOptions>();
 
         services.AddScoped<ISetupInitializer, TInitializer>();
+        // Idempotent (TryAdd en interne) : ne duplique rien si l'application hôte
+        // appelle déjà AddDataProtection() ailleurs. Nécessaire ici pour que
+        // SetupService dispose d'un IDataProtectionProvider dès le premier
+        // démarrage, avant même que l'hôte n'enregistre le sien (souvent gaté
+        // derrière la fin de l'installation) — voir SetupService.ProtectPendingState.
+        services.AddDataProtection();
         services.AddSingleton<SetupService>();
         return services;
     }

@@ -276,7 +276,7 @@ internal static class SetupPage
 
     // ── Étape 2 : initialisation de la base ───────────────────────────────────
 
-    public static string RenderStep2(string appName, string? error, DbProvider provider)
+    public static string RenderStep2(string appName, string? error, DbProvider provider, string pendingStateToken)
     {
         StringBuilder b = new StringBuilder();
         b.Append(StepHeader(appName, 2));
@@ -288,6 +288,7 @@ internal static class SetupPage
           <p class="text-secondary">Les migrations et les données de référence vont être appliquées à la base.</p>
           <form method="post" action="/setup">
             <input type="hidden" name="step" value="2" />
+            <input type="hidden" name="pendingState" value="{Enc(pendingStateToken)}" />
             <button type="submit" class="btn btn-primary w-100 py-2">
               <i class="bi bi-gear-wide-connected me-1"></i>Initialiser la base de donnees
             </button>
@@ -307,7 +308,7 @@ internal static class SetupPage
 
     // ── Étape 3 : compte administrateur ───────────────────────────────────────
 
-    public static string RenderStep3(string appName, string? error, IDictionary<string, string>? values)
+    public static string RenderStep3(string appName, string? error, IDictionary<string, string>? values, string pendingStateToken)
     {
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
         StringBuilder b = new StringBuilder();
@@ -316,6 +317,7 @@ internal static class SetupPage
         b.Append($"""
           <form method="post" action="/setup">
             <input type="hidden" name="step" value="3" />
+            <input type="hidden" name="pendingState" value="{Enc(pendingStateToken)}" />
             <h2 class="text-uppercase text-secondary fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em">
               <i class="bi bi-shield-lock me-1"></i>Compte administrateur
             </h2>

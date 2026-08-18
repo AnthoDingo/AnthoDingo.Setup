@@ -1,5 +1,7 @@
 using System.Data.Common;
+using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -27,19 +29,60 @@ public sealed class SetupService(
     IHostEnvironment            env,
     IServiceScopeFactory        scopeFactory,
     IOptions<SetupOptions>      options,
+    IDataProtectionProvider     dataProtectionProvider,
     ILogger<SetupService>       logger)
 {
     private readonly SetupOptions _opts = options.Value;
+    private readonly ITimeLimitedDataProtector _pendingStateProtector =
+        dataProtectionProvider.CreateProtector("AnthoDingo.Setup.PendingState").ToTimeLimitedDataProtector();
     private bool? _cachedComplete;
 
-    /// <summary>
-    /// Chaîne de connexion validée à l'étape 1, conservée en mémoire entre les
-    /// étapes du wizard (évite de transporter le mot de passe dans le HTML).
-    /// </summary>
-    public string? PendingConnectionString { get; set; }
+    private static readonly TimeSpan PendingStateLifetime = TimeSpan.FromMinutes(30);
 
-    /// <summary>Type de base de données validé à l'étape 1, conservé entre les étapes du wizard.</summary>
-    public DbProvider? PendingProvider { get; set; }
+    private sealed record PendingState(DbProvider Provider, string ConnectionString);
+
+    /// <summary>
+    /// Chiffre le provider et la chaîne de connexion validés à l'étape 1 dans un
+    /// jeton opaque, à transporter d'une étape à l'autre du wizard via un champ
+    /// caché du formulaire plutôt qu'en mémoire serveur — voir
+    /// <see cref="TryUnprotectPendingState"/>. Contrairement à un état conservé sur
+    /// ce singleton, ce jeton survit à un redémarrage/recyclage du process entre
+    /// deux étapes et fonctionne même si les requêtes successives atterrissent sur
+    /// des worker processes différents (IIS en Web Garden, plusieurs instances
+    /// derrière un reverse proxy). Expire de lui-même après <see cref="PendingStateLifetime"/>.
+    /// </summary>
+    public string ProtectPendingState(DbProvider provider, string connectionString)
+    {
+        string json = JsonSerializer.Serialize(new PendingState(provider, connectionString));
+        return _pendingStateProtector.Protect(json, PendingStateLifetime);
+    }
+
+    /// <summary>
+    /// Déchiffre un jeton produit par <see cref="ProtectPendingState"/>. Retourne
+    /// <c>false</c> si <paramref name="token"/> est absent, altéré ou expiré — le
+    /// wizard doit alors repartir de l'étape 1.
+    /// </summary>
+    public bool TryUnprotectPendingState(string? token, out DbProvider provider, out string connectionString)
+    {
+        provider = default;
+        connectionString = string.Empty;
+        if (string.IsNullOrEmpty(token)) return false;
+
+        try
+        {
+            string json = _pendingStateProtector.Unprotect(token);
+            PendingState? state = JsonSerializer.Deserialize<PendingState>(json);
+            if (state is null) return false;
+
+            provider = state.Provider;
+            connectionString = state.ConnectionString;
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
 
     // ── Détection ─────────────────────────────────────────────────────────────
 
