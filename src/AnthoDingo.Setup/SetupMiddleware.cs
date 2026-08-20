@@ -204,7 +204,7 @@ public sealed class SetupMiddleware(
             return;
         }
 
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null, pendingStateToken!));
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null, pendingStateToken!, _opts.AllowUsernameAdmin));
     }
 
     private async Task Step3AdminAsync(
@@ -224,11 +224,17 @@ public sealed class SetupMiddleware(
         string  confirm     = form["adminConfirm"].ToString();
 
         if (string.IsNullOrWhiteSpace(email))
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values, pendingStateToken!)); return; }
+        {
+            string msg = _opts.AllowUsernameAdmin ? "Le nom d'utilisateur administrateur est obligatoire." : "L'email administrateur est obligatoire.";
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, msg, values, pendingStateToken!, _opts.AllowUsernameAdmin));
+            return;
+        }
+        if (!_opts.AllowUsernameAdmin && !email.Contains('@'))
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Adresse email invalide.", values, pendingStateToken!, _opts.AllowUsernameAdmin)); return; }
         if (password.Length < 8)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values, pendingStateToken!)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values, pendingStateToken!, _opts.AllowUsernameAdmin)); return; }
         if (password != confirm)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values, pendingStateToken!)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values, pendingStateToken!, _opts.AllowUsernameAdmin)); return; }
 
         try
         {
@@ -236,7 +242,7 @@ public sealed class SetupMiddleware(
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values, pendingStateToken!));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values, pendingStateToken!, _opts.AllowUsernameAdmin));
             return;
         }
 
