@@ -88,6 +88,10 @@ builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 // builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 //     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
 
+// Pour identifier le compte admin par un nom d'utilisateur plutôt qu'un email :
+// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+//     o.AllowUsernameAdmin = true);
+
 var app = builder.Build();
 
 app.UseSetupMiddleware("Mon Application");   // page /setup intégrée
@@ -136,6 +140,7 @@ le schéma et créer le compte administrateur.
 | `AdminAccount(UserName, Password, DisplayName?)` | Compte admin à créer. |
 | `DbProvider` | Enum : `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Types de base proposés dans l'assistant (par défaut : les 4). |
+| `SetupOptions.AllowUsernameAdmin` | Si `true`, le compte admin (étape 3) est identifié par un nom d'utilisateur au lieu d'une adresse email (par défaut : `false`). |
 | `SetupOptions` | Personnalisation (chemin, préfixes autorisés, nom de la chaîne…). |
 
 ## Breaking change (v2.0.0)

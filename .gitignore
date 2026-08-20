@@ -3,3 +3,4 @@ obj/
 *.user
 appsettings.local.json
 src/AnthoDingo.Setup.Example/App_Data/
+.vs

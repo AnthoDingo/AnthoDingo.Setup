@@ -88,6 +88,10 @@ builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 // builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 //     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
 
+// To identify the admin account by a username instead of an email address:
+// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+//     o.AllowUsernameAdmin = true);
+
 var app = builder.Build();
 
 app.UseSetupMiddleware("My Application");   // built-in /setup page
@@ -136,6 +140,7 @@ schema and create the administrator account.
 | `AdminAccount(UserName, Password, DisplayName?)` | Admin account to create. |
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Database types offered in the wizard (default: all 4). |
+| `SetupOptions.AllowUsernameAdmin` | If `true`, the admin account (step 3) is identified by a username instead of an email address (default: `false`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |
 
 ## Breaking change (v2.0.0)
