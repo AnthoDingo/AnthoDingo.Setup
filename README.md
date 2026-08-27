@@ -103,6 +103,53 @@ if (setup.IsSetupComplete())
 > Pour fournir votre propre page d'installation à la place de la page intégrée,
 > utilisez `app.UseSetupGate()` (garde seule, sans page).
 
+### 3. (optionnel) Ajouter des étapes supplémentaires
+
+Une application hôte peut étendre le premier paramétrage en ajoutant ses propres
+étapes, insérées dans le wizard **entre la création du compte administrateur et
+le redémarrage final** (préférences, licence, configuration métier…).
+
+```csharp
+public sealed class CompanySetupStep : ISetupExtraStep
+{
+    public string Id => "company";
+    public string Label => "Societe";
+
+    public Task<string> RenderAsync(SetupExtraStepContext ctx, CancellationToken ct) =>
+        Task.FromResult($"""
+          <form method="post" action="/setup">
+            <input type="hidden" name="step" value="{Id}" />
+            <input type="hidden" name="pendingState" value="{ctx.PendingStateToken}" />
+            <input type="text" class="form-control" name="companyName" required />
+            <button type="submit" class="btn btn-primary w-100">Continuer</button>
+          </form>
+          """);
+
+    public async Task<SetupExtraStepResult> HandleAsync(SetupExtraStepContext ctx, IFormCollection form, CancellationToken ct)
+    {
+        string name = form["companyName"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return SetupExtraStepResult.Failure("Le nom de la societe est obligatoire.");
+
+        await using AppDbContext db = AppDbContext.Create(ctx.Provider, ctx.ConnectionString);
+        db.Settings.Add(new AppSettings { CompanyName = name });
+        await db.SaveChangesAsync(ct);
+        return SetupExtraStepResult.Success();
+    }
+}
+```
+
+```csharp
+builder.Services.AddSetupStep<CompanySetupStep>();
+// Plusieurs appels s'enchainent dans leur ordre d'enregistrement.
+```
+
+L'étape fournit elle-même son `<form>` complet (champs + bouton) ; la
+bibliothèque se charge uniquement de l'habillage (logo, stepper, message
+d'erreur) et insère automatiquement le libellé (`Label`) dans le stepper.
+Comme `ISetupInitializer`, l'étape est résolue dans un scope dédié : elle peut
+donc injecter normalement un `DbContext` ou toute autre dépendance.
+
 ## Projet d'exemple
 
 `src/AnthoDingo.Setup.Example` est une application ASP.NET Core minimale (API +
@@ -115,7 +162,8 @@ dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
 Puis ouvrir `/setup` : choisir un type de base, tester la connexion, initialiser
-le schéma et créer le compte administrateur.
+le schéma, créer le compte administrateur, renseigner le nom de la société
+(étape supplémentaire de démonstration, voir `CompanySetupStep`).
 
 ## API
 
@@ -133,6 +181,10 @@ le schéma et créer le compte administrateur.
 | `SetupService.BuildSqliteConnectionString(...)` | Construit une chaîne de connexion SQLite (fichier). |
 | `SetupService.CompleteSetup(provider, cs)` | Écrit `appsettings.local.json` (`Setup:IsComplete`, `Setup:Provider`, connection string). |
 | `ISetupInitializer` | Implémentée par l'app : migrations + création admin, reçoit le `DbProvider`. |
+| `AddSetupStep<TStep>()` | Ajoute une étape supplémentaire (`ISetupExtraStep`) entre la création de l'admin et le redémarrage. |
+| `ISetupExtraStep` | Étape supplémentaire fournie par l'app : `Id`, `Label`, `RenderAsync`, `HandleAsync`. |
+| `SetupExtraStepContext` | Contexte passé à l'étape (provider, chaîne de connexion, jeton d'état, erreur, valeurs postées). |
+| `SetupExtraStepResult` | Résultat de `HandleAsync` : `Success()` ou `Failure(message)`. |
 | `AdminAccount(UserName, Password, DisplayName?)` | Compte admin à créer. |
 | `DbProvider` | Enum : `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Types de base proposés dans l'assistant (par défaut : les 4). |

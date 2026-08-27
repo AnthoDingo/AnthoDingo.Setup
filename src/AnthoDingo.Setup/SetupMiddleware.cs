@@ -60,7 +60,7 @@ public sealed class SetupMiddleware(
                 // une sonde de monitoring / plusieurs workers ne cassent plus le
                 // wizard en cours (voir historique : "Session expiree" causé par
                 // un état conservé sur ce singleton et effacé par n'importe quel GET).
-                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders));
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders, ExtraLabels(setup)));
             }
             return;
         }
@@ -85,17 +85,41 @@ public sealed class SetupMiddleware(
         Dictionary<string, string> values = form.ToDictionary(f => f.Key, f => f.Value.ToString());
         string step = form["step"].ToString();
 
+        IReadOnlyList<(string Id, string Label)> extraSteps = setup.GetExtraStepDescriptors();
+        IReadOnlyList<string> extraLabels = ExtraLabels(extraSteps);
+
         switch (step)
         {
-            case "1": await Step1ConnectionAsync(ctx, setup, form, values); break;
-            case "2": await Step2InitDbAsync(ctx, setup, form); break;
-            case "3": await Step3AdminAsync(ctx, setup, lifetime, logger, form, values); break;
-            default:  await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders)); break;
+            case "1": await Step1ConnectionAsync(ctx, setup, form, values, extraLabels); break;
+            case "2": await Step2InitDbAsync(ctx, setup, form, extraLabels); break;
+            case "3": await Step3AdminAsync(ctx, setup, lifetime, logger, form, values, extraSteps, extraLabels); break;
+            default:
+                int extraIndex = IndexOfExtraStep(extraSteps, step);
+                if (extraIndex >= 0)
+                    await StepExtraAsync(ctx, setup, lifetime, logger, form, values, extraSteps, extraLabels, extraIndex);
+                else
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, null, null, _opts.AllowedProviders, extraLabels));
+                break;
         }
     }
 
+    private static IReadOnlyList<string> ExtraLabels(SetupService setup) => ExtraLabels(setup.GetExtraStepDescriptors());
+
+    private static IReadOnlyList<string> ExtraLabels(IReadOnlyList<(string Id, string Label)> descriptors) =>
+        descriptors.Select(d => d.Label).ToList();
+
+    private static int IndexOfExtraStep(IReadOnlyList<(string Id, string Label)> extraSteps, string id)
+    {
+        for (int i = 0; i < extraSteps.Count; i++)
+        {
+            if (extraSteps[i].Id == id) return i;
+        }
+        return -1;
+    }
+
     private async Task Step1ConnectionAsync(
-        HttpContext ctx, SetupService setup, IFormCollection form, Dictionary<string, string> values)
+        HttpContext ctx, SetupService setup, IFormCollection form, Dictionary<string, string> values,
+        IReadOnlyList<string> extraLabels)
     {
         if (!Enum.TryParse(form["dbProvider"], ignoreCase: true, out DbProvider provider) || !_opts.AllowedProviders.Contains(provider))
             provider = _opts.AllowedProviders.Count > 0 ? _opts.AllowedProviders[0] : DbProvider.SqlServer;
@@ -114,7 +138,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur et le nom de la base sont obligatoires.", values, _opts.AllowedProviders));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur et le nom de la base sont obligatoires.", values, _opts.AllowedProviders, extraLabels));
                     return;
                 }
                 connectionString = setup.BuildSqlConnectionString(server, database, windowsAuth, user, password, trustCert);
@@ -131,7 +155,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders, extraLabels));
                     return;
                 }
                 connectionString = setup.BuildMySqlConnectionString(server, port, database, user!, password, trustCert);
@@ -148,7 +172,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders, extraLabels));
                     return;
                 }
                 connectionString = setup.BuildPostgresConnectionString(server, port, database, user!, password, trustCert);
@@ -159,21 +183,21 @@ public sealed class SetupMiddleware(
                 string file = form["sq_file"].ToString().Trim();
                 if (string.IsNullOrWhiteSpace(file))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le chemin du fichier SQLite est obligatoire.", values, _opts.AllowedProviders));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Le chemin du fichier SQLite est obligatoire.", values, _opts.AllowedProviders, extraLabels));
                     return;
                 }
                 connectionString = setup.BuildSqliteConnectionString(file);
                 break;
             }
             default:
-                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Type de base de donnees invalide.", values, _opts.AllowedProviders));
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Type de base de donnees invalide.", values, _opts.AllowedProviders, extraLabels));
                 return;
         }
 
         string? err = await setup.TestConnectionAsync(provider, connectionString, ctx.RequestAborted);
         if (err is not null)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, $"Connexion echouee : {err}", values, _opts.AllowedProviders));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, $"Connexion echouee : {err}", values, _opts.AllowedProviders, extraLabels));
             return;
         }
 
@@ -182,15 +206,16 @@ public sealed class SetupMiddleware(
         // process et fonctionne même si l'étape suivante atterrit sur un autre
         // worker process (IIS Web Garden, plusieurs instances derrière un proxy).
         string pendingStateToken = setup.ProtectPendingState(provider, connectionString);
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null, provider, pendingStateToken));
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, null, provider, pendingStateToken, extraLabels));
     }
 
-    private async Task Step2InitDbAsync(HttpContext ctx, SetupService setup, IFormCollection form)
+    private async Task Step2InitDbAsync(
+        HttpContext ctx, SetupService setup, IFormCollection form, IReadOnlyList<string> extraLabels)
     {
         string? pendingStateToken = form["pendingState"];
         if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders, extraLabels));
             return;
         }
 
@@ -200,21 +225,22 @@ public sealed class SetupMiddleware(
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}", provider, pendingStateToken!));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep2(appName, $"Initialisation echouee : {ex.Message}", provider, pendingStateToken!, extraLabels));
             return;
         }
 
-        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null, pendingStateToken!));
+        await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, null, null, pendingStateToken!, extraLabels));
     }
 
     private async Task Step3AdminAsync(
         HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
-        IFormCollection form, Dictionary<string, string> values)
+        IFormCollection form, Dictionary<string, string> values,
+        IReadOnlyList<(string Id, string Label)> extraSteps, IReadOnlyList<string> extraLabels)
     {
         string? pendingStateToken = form["pendingState"];
         if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders, extraLabels));
             return;
         }
 
@@ -224,11 +250,11 @@ public sealed class SetupMiddleware(
         string  confirm     = form["adminConfirm"].ToString();
 
         if (string.IsNullOrWhiteSpace(email))
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values, pendingStateToken!)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "L'email administrateur est obligatoire.", values, pendingStateToken!, extraLabels)); return; }
         if (password.Length < 8)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values, pendingStateToken!)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Le mot de passe doit faire au moins 8 caracteres.", values, pendingStateToken!, extraLabels)); return; }
         if (password != confirm)
-        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values, pendingStateToken!)); return; }
+        { await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, "Les mots de passe ne correspondent pas.", values, pendingStateToken!, extraLabels)); return; }
 
         try
         {
@@ -236,13 +262,66 @@ public sealed class SetupMiddleware(
         }
         catch (Exception ex)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values, pendingStateToken!));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep3(appName, ex.Message, values, pendingStateToken!, extraLabels));
+            return;
+        }
+
+        if (extraSteps.Count > 0)
+        {
+            (string Id, string Label) first = extraSteps[0];
+            SetupExtraStepContext stepCtx = new(appName, provider, connectionString, pendingStateToken!, null, null);
+            string body = await setup.RenderExtraStepAsync(first.Id, stepCtx, ctx.RequestAborted);
+            await WriteHtmlAsync(ctx, SetupPage.RenderExtraStep(appName, null, body, extraLabels, 1));
             return;
         }
 
         setup.CompleteSetup(provider, connectionString);
-        await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName));
+        await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName, extraLabels));
+        ScheduleRestart(lifetime, logger);
+    }
 
+    private async Task StepExtraAsync(
+        HttpContext ctx, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
+        IFormCollection form, Dictionary<string, string> values,
+        IReadOnlyList<(string Id, string Label)> extraSteps, IReadOnlyList<string> extraLabels, int extraIndex)
+    {
+        (string Id, string Label) current = extraSteps[extraIndex];
+        string? pendingStateToken = form["pendingState"];
+
+        if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
+        {
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(appName, "Session expiree, recommencez.", null, _opts.AllowedProviders, extraLabels));
+            return;
+        }
+
+        SetupExtraStepContext handleCtx = new(appName, provider, connectionString, pendingStateToken!, null, values);
+        SetupExtraStepResult result = await setup.HandleExtraStepAsync(current.Id, handleCtx, form, ctx.RequestAborted);
+
+        if (!result.IsSuccess)
+        {
+            SetupExtraStepContext errorCtx = handleCtx with { Error = result.Error };
+            string body = await setup.RenderExtraStepAsync(current.Id, errorCtx, ctx.RequestAborted);
+            await WriteHtmlAsync(ctx, SetupPage.RenderExtraStep(appName, result.Error, body, extraLabels, extraIndex + 1));
+            return;
+        }
+
+        int nextIndex = extraIndex + 1;
+        if (nextIndex < extraSteps.Count)
+        {
+            (string Id, string Label) next = extraSteps[nextIndex];
+            SetupExtraStepContext nextCtx = new(appName, provider, connectionString, pendingStateToken!, null, null);
+            string body = await setup.RenderExtraStepAsync(next.Id, nextCtx, ctx.RequestAborted);
+            await WriteHtmlAsync(ctx, SetupPage.RenderExtraStep(appName, null, body, extraLabels, nextIndex + 1));
+            return;
+        }
+
+        setup.CompleteSetup(provider, connectionString);
+        await WriteHtmlAsync(ctx, SetupPage.RenderSuccess(appName, extraLabels));
+        ScheduleRestart(lifetime, logger);
+    }
+
+    private static void ScheduleRestart(IHostApplicationLifetime lifetime, ILogger logger)
+    {
         logger.LogInformation("[Setup] Installation terminee — redemarrage de l'application.");
         _ = Task.Run(async () =>
         {

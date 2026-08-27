@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -36,6 +37,7 @@ public sealed class SetupService(
     private readonly ITimeLimitedDataProtector _pendingStateProtector =
         dataProtectionProvider.CreateProtector("AnthoDingo.Setup.PendingState").ToTimeLimitedDataProtector();
     private bool? _cachedComplete;
+    private IReadOnlyList<(string Id, string Label)>? _cachedExtraStepDescriptors;
 
     private static readonly TimeSpan PendingStateLifetime = TimeSpan.FromMinutes(30);
 
@@ -185,6 +187,43 @@ public sealed class SetupService(
         await init.CreateAdminAsync(provider, connectionString, admin, ct);
         logger.LogInformation("[Setup] Compte admin « {User} » créé ({Provider}).", admin.UserName, provider);
     }
+
+    // ── Étapes supplémentaires (fournies par l'application hôte) ──────────────
+
+    /// <summary>
+    /// Identifiants et libellés des étapes supplémentaires enregistrées via
+    /// <see cref="SetupExtensions.AddSetupStep{TStep}"/>, dans leur ordre
+    /// d'enregistrement. Mis en cache après la première résolution : la liste
+    /// des étapes enregistrées ne change pas en cours de vie de l'application.
+    /// </summary>
+    public IReadOnlyList<(string Id, string Label)> GetExtraStepDescriptors()
+    {
+        if (_cachedExtraStepDescriptors is not null) return _cachedExtraStepDescriptors;
+
+        using IServiceScope scope = scopeFactory.CreateScope();
+        _cachedExtraStepDescriptors = scope.ServiceProvider.GetServices<ISetupExtraStep>()
+            .Select(s => (s.Id, s.Label))
+            .ToList();
+        return _cachedExtraStepDescriptors;
+    }
+
+    /// <summary>Résout et affiche l'étape supplémentaire <paramref name="id"/> (voir <see cref="ISetupExtraStep.RenderAsync"/>).</summary>
+    public async Task<string> RenderExtraStepAsync(string id, SetupExtraStepContext context, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        return await ResolveExtraStep(scope, id).RenderAsync(context, ct);
+    }
+
+    /// <summary>Résout et traite la soumission de l'étape supplémentaire <paramref name="id"/> (voir <see cref="ISetupExtraStep.HandleAsync"/>).</summary>
+    public async Task<SetupExtraStepResult> HandleExtraStepAsync(string id, SetupExtraStepContext context, IFormCollection form, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        return await ResolveExtraStep(scope, id).HandleAsync(context, form, ct);
+    }
+
+    private static ISetupExtraStep ResolveExtraStep(IServiceScope scope, string id) =>
+        scope.ServiceProvider.GetServices<ISetupExtraStep>().FirstOrDefault(s => s.Id == id)
+            ?? throw new InvalidOperationException($"Aucune etape supplementaire enregistree avec l'identifiant « {id} ».");
 
     // ── Finalisation — écrire appsettings.local.json ──────────────────────────
 

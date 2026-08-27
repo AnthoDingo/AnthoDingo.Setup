@@ -31,6 +31,20 @@ public static class SetupExtensions
     }
 
     /// <summary>
+    /// Ajoute une étape supplémentaire <typeparamref name="TStep"/> au wizard, exécutée
+    /// entre la création du compte administrateur et le redémarrage final. Les appels
+    /// successifs s'enregistrent dans l'ordre : la première étape ajoutée est la première
+    /// affichée. Enregistrée en <b>scoped</b> (comme <see cref="ISetupInitializer"/>) : elle
+    /// peut donc injecter normalement un DbContext ou toute autre dépendance.
+    /// </summary>
+    public static IServiceCollection AddSetupStep<TStep>(this IServiceCollection services)
+        where TStep : class, ISetupExtraStep
+    {
+        services.AddScoped<ISetupExtraStep, TStep>();
+        return services;
+    }
+
+    /// <summary>
     /// Branche la garde d'installation <b>avec la page intégrée</b> servie par
     /// la bibliothèque. À appeler en tout premier dans le pipeline.
     ///
