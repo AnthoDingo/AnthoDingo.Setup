@@ -188,6 +188,7 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 | `AdminAccount(UserName, Password, DisplayName?)` | Compte admin à créer. |
 | `DbProvider` | Enum : `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Types de base proposés dans l'assistant (par défaut : les 4). |
+| `SetupOptions.AllowUsernameAdmin` | Si `true`, l'admin de l'étape 3 est identifié par un nom d'utilisateur plutôt qu'un email (par défaut `false`). |
 | `SetupOptions` | Personnalisation (chemin, préfixes autorisés, nom de la chaîne…). |
 
 ## Breaking change (v2.0.0)

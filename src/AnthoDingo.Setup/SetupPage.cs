@@ -312,9 +312,12 @@ internal static class SetupPage
 
     public static string RenderStep3(
         string appName, string? error, IDictionary<string, string>? values, string pendingStateToken,
-        IReadOnlyList<string> extraLabels)
+        IReadOnlyList<string> extraLabels, bool allowUsernameAdmin = false)
     {
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
+        string fieldType        = allowUsernameAdmin ? "text" : "email";
+        string fieldLabel       = allowUsernameAdmin ? "Nom d'utilisateur" : "Email";
+        string fieldPlaceholder = allowUsernameAdmin ? "admin" : "admin@exemple.com";
         StringBuilder b = new StringBuilder();
         b.Append(StepHeader(appName, BuildLabels(extraLabels), 3));
         b.Append(ErrorBlock(error));
@@ -326,8 +329,8 @@ internal static class SetupPage
               <i class="bi bi-shield-lock me-1"></i>Compte administrateur
             </h2>
             <div class="mb-3">
-              <label class="form-label">Email</label>
-              <input type="email" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="admin@exemple.com" required />
+              <label class="form-label">{fieldLabel}</label>
+              <input type="{fieldType}" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="{fieldPlaceholder}" required />
             </div>
             <div class="mb-3">
               <label class="form-label">Nom affiche <span class="text-secondary">(optionnel)</span></label>

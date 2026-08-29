@@ -55,4 +55,12 @@ public sealed class SetupOptions
         DbProvider.Postgres,
         DbProvider.Sqlite
     ];
+
+    /// <summary>
+    /// Si <c>true</c>, le compte administrateur créé à l'étape 3 peut être
+    /// identifié par un nom d'utilisateur plutôt qu'une adresse email (le champ
+    /// n'est alors plus validé/typé comme un email). Par défaut <c>false</c> :
+    /// une adresse email est exigée.
+    /// </summary>
+    public bool AllowUsernameAdmin { get; set; }
 }

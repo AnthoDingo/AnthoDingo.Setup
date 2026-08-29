@@ -188,6 +188,7 @@ sample extra step, see `CompanySetupStep`).
 | `AdminAccount(UserName, Password, DisplayName?)` | Admin account to create. |
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Database types offered in the wizard (default: all 4). |
+| `SetupOptions.AllowUsernameAdmin` | If `true`, the step 3 admin is identified by a username instead of an email (default `false`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |
 
 ## Breaking change (v2.0.0)
