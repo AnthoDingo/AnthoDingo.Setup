@@ -86,6 +86,33 @@ public sealed class SetupService(
         }
     }
 
+    private readonly ITimeLimitedDataProtector _preInstallProtector =
+        dataProtectionProvider.CreateProtector("AnthoDingo.Setup.PreInstall").ToTimeLimitedDataProtector();
+
+    /// <summary>
+    /// Chiffre l'étape de pré-installation atteinte (licence acceptée, tâches
+    /// réussies) dans un jeton opaque, transporté comme <see cref="ProtectPendingState"/>
+    /// par un champ caché : empêche de sauter la licence ou un prérequis en
+    /// postant directement une étape ultérieure.
+    /// </summary>
+    public string ProtectPreInstallStage(int stage) =>
+        _preInstallProtector.Protect(stage.ToString(System.Globalization.CultureInfo.InvariantCulture), PendingStateLifetime);
+
+    /// <summary>Déchiffre un jeton de <see cref="ProtectPreInstallStage"/> ; <c>false</c> si absent, altéré ou expiré.</summary>
+    public bool TryUnprotectPreInstallStage(string? token, out int stage)
+    {
+        stage = -1;
+        if (string.IsNullOrEmpty(token)) return false;
+        try
+        {
+            return int.TryParse(_preInstallProtector.Unprotect(token), System.Globalization.CultureInfo.InvariantCulture, out stage);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
     // ── Détection ─────────────────────────────────────────────────────────────
 
     /// <summary>

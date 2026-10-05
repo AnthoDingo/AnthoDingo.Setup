@@ -5,13 +5,16 @@
 First-run "setup" middleware for ASP.NET Core.
 
 Until the application is configured, every request is redirected to a `/setup`
-page **provided by the library** (database form + administrator account). On
-submit: connection test → migrations/seed → admin creation → writes an
+page **provided by the library** (optional license and pre-install tasks,
+database form, administrator account). On submit: connection test → migrations/seed → admin creation → writes an
 `appsettings.local.json` → restart.
 
 - **4 supported database types**: SQL Server, MySQL/MariaDB, PostgreSQL and
   SQLite (local file). The wizard shows a selector with the fields relevant to
   each type; the host application can restrict the list that is offered.
+- **License and prerequisites** (optional): a license page, with an optional
+  mandatory acceptance checkbox, and application-specific pre-install tasks
+  (prerequisite checks, disclaimer…) before the connection step.
 - **File-based detection**: no database call on every request.
 - **Built-in offline page**: Bootstrap + Bootstrap Icons are **embedded in the
   assembly** and served under `/setup/_assets/` — no dependency on a CDN or on
@@ -104,10 +107,43 @@ if (setup.IsSetupComplete())
 }
 ```
 
-> To provide your own setup page instead of the built-in one, use
-> `app.UseSetupGate()` (gate only, no page).
+### 3. (Optional) License and pre-install tasks
 
-### 3. (optional) Add extra steps
+Before the database connection, the wizard can show a **license** page, then one
+page per **pre-install task** (prerequisite checks, disclaimer…). Order: License →
+tasks (registration order) → Connection → Database → Admin.
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.LicenseText = File.ReadAllText("LICENSE"); // license page + "Next" button
+    o.RequireLicenseAcceptance = true;           // mandatory "I accept" checkbox
+});
+builder.Services.AddSetupPreInstallTask<PrerequisitesCheck>();
+
+public sealed class PrerequisitesCheck : ISetupPreInstallTask
+{
+    public string Title => "Prerequisites";
+
+    public Task<SetupTaskResult> ExecuteAsync(CancellationToken ct = default) =>
+        Task.FromResult(Environment.Is64BitProcess
+            ? SetupTaskResult.Ok("<p>64-bit process: OK.</p>")      // "Next" button
+            : SetupTaskResult.Fail("A 64-bit process is required.")); // "Retry" button
+}
+```
+
+- The task runs every time its page is shown (and on every "Retry"); an exception
+  is shown as a failure. `Html` is inserted **unencoded** (application content,
+  never user input); `Error` is encoded.
+- A disclaimer is just a task that always returns `SetupTaskResult.Ok(html)`.
+- Progress (license accepted, tasks passed) travels in an encrypted token: a forged
+  POST cannot skip the license or a failing prerequisite.
+
+> To provide your own setup page instead of the built-in one, use
+> `app.UseSetupGate()` (gate only, no page). The license and pre-install tasks
+> then only apply to the built-in page.
+
+### 4. (optional) Add extra steps
 
 A host application can extend the initial setup by adding its own steps,
 inserted in the wizard **between admin account creation and the final
@@ -158,14 +194,15 @@ inject a `DbContext` or any other dependency normally.
 
 `src/AnthoDingo.Setup.Example` is a minimal ASP.NET Core application (API + EF
 Core) showing the full integration: an `ISetupInitializer` implementation, an
-`AppDbContext` that switches between the 4 EF Core providers, and the
-middleware wired up in `Program.cs`.
+`AppDbContext` that switches between the 4 EF Core providers, a
+`WritableContentRootCheck` pre-install task (application folder is writable), and
+the middleware wired up in `Program.cs`.
 
 ```bash
 dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
-Then open `/setup`: pick a database type, test the connection, initialize the
+Then open `/setup`: pass the prerequisite check, pick a database type, test the connection, initialize the
 schema, create the administrator account, and fill in the company name (a
 sample extra step, see `CompanySetupStep`).
 
@@ -193,6 +230,10 @@ sample extra step, see `CompanySetupStep`).
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Database types offered in the wizard (default: all 4). |
 | `SetupOptions.AllowUsernameAdmin` | If `true`, the step 3 admin is identified by a username instead of an email (default `false`). |
+| `SetupOptions.LicenseText` | License text: when set, a "License" page with a "Next" button is shown before the connection step (default: `null`). |
+| `SetupOptions.RequireLicenseAcceptance` | If `true`, the license page shows a mandatory "I accept the license terms" checkbox (default: `false`). |
+| `AddSetupPreInstallTask<TTask>()` | Adds a pre-install task (prerequisites, disclaimer…) shown before the connection step. |
+| `ISetupPreInstallTask` / `SetupTaskResult` | Pre-install task (`Title`, `ExecuteAsync`) and its result (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |
 
 ## Breaking change (v2.0.0)

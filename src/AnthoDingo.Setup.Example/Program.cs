@@ -10,6 +10,10 @@ builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, relo
 
 builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 
+// Tâches affichées avant la connexion à la base (prérequis, avertissement…),
+// dans l'ordre d'enregistrement.
+builder.Services.AddSetupPreInstallTask<WritableContentRootCheck>();
+
 // Pour restreindre les types de base proposés par l'assistant :
 // builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 //     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
@@ -20,6 +24,13 @@ builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 // Étape supplémentaire : exécutée après la création du compte admin et avant le
 // redémarrage final. Plusieurs appels s'enchaînent dans l'ordre d'enregistrement.
 builder.Services.AddSetupStep<CompanySetupStep>();
+
+// Pour afficher une page licence (avec case à cocher obligatoire) en premier :
+// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+// {
+//     o.LicenseText = File.ReadAllText("LICENSE");
+//     o.RequireLicenseAcceptance = true;
+// });
 
 WebApplication app = builder.Build();
 

@@ -51,12 +51,80 @@ internal static class SetupPage
 </html>
 """;
 
+    /// <summary>
+    /// Nom de l'application + libellés pour l'indicateur d'étapes : étapes préalables
+    /// (licence, tâches de pré-installation) et étapes supplémentaires de l'application
+    /// hôte (<see cref="ISetupExtraStep"/>, entre « Admin » et « Termine »).
+    /// </summary>
+    public sealed record Wizard(string AppName, IReadOnlyList<string> PreSteps, IReadOnlyList<string> ExtraSteps)
+    {
+        public IReadOnlyList<string> Labels { get; } = [.. PreSteps, "Connexion", "Base", "Admin", .. ExtraSteps, "Termine"];
+    }
+
+    // ── Préalable : licence d'utilisation ─────────────────────────────────────
+
+    public static string RenderLicense(Wizard w, string? error, string licenseText, bool requireAcceptance)
+    {
+        StringBuilder b = new StringBuilder();
+        b.Append(StepHeader(w, 1));
+        b.Append(ErrorBlock(error));
+        b.Append($"""
+          <form method="post" action="/setup">
+            <input type="hidden" name="step" value="license" />
+            <h2 class="text-uppercase text-secondary fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em">
+              <i class="bi bi-file-earmark-text me-1"></i>Licence d'utilisation
+            </h2>
+            <div class="border rounded p-3 mb-3 bg-light small" style="max-height:320px;overflow:auto;white-space:pre-wrap">{Enc(licenseText)}</div>
+        """);
+        if (requireAcceptance)
+        {
+            b.Append("""
+            <div class="form-check mb-3">
+              <input type="checkbox" class="form-check-input" id="acceptLicense" name="acceptLicense" required />
+              <label class="form-check-label" for="acceptLicense">J'accepte les termes de la licence</label>
+            </div>
+            """);
+        }
+        b.Append("""
+            <button type="submit" class="btn btn-primary w-100 py-2">
+              Suivant <i class="bi bi-arrow-right ms-1"></i>
+            </button>
+          </form>
+        """);
+        return Wrap(w, b.ToString());
+    }
+
+    // ── Préalable : tâche de pré-installation ─────────────────────────────────
+
+    // token : jeton de l'étape à poster — celle d'après si la tâche a réussi
+    // (« Suivant »), celle-ci sinon (« Réessayer »).
+    public static string RenderTask(Wizard w, int current, string title, SetupTaskResult result, string token, string? error = null)
+    {
+        StringBuilder b = new StringBuilder();
+        b.Append(StepHeader(w, current));
+        b.Append(ErrorBlock(error ?? (result.Success ? null : result.Error ?? "Cette etape a echoue.")));
+        b.Append($"""
+          <form method="post" action="/setup">
+            <input type="hidden" name="step" value="pre" />
+            <input type="hidden" name="preInstall" value="{Enc(token)}" />
+            <h2 class="text-uppercase text-secondary fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em">
+              <i class="bi bi-list-check me-1"></i>{Enc(title)}
+            </h2>
+            <div class="mb-3">{result.Html}</div>
+            {(result.Success
+                ? """<button type="submit" class="btn btn-primary w-100 py-2">Suivant <i class="bi bi-arrow-right ms-1"></i></button>"""
+                : """<button type="submit" class="btn btn-outline-primary w-100 py-2"><i class="bi bi-arrow-clockwise me-1"></i>Reessayer</button>""")}
+          </form>
+        """);
+        return Wrap(w, b.ToString());
+    }
+
     // ── Étape 1 : connexion base de données ────────────────────────────────────
 
     public static string RenderStep1(
-        string appName, string? error, IDictionary<string, string>? values, IReadOnlyList<DbProvider> allowedProviders,
-        IReadOnlyList<string> extraLabels)
+        Wizard w, string? error, IDictionary<string, string>? values, IReadOnlyList<DbProvider> allowedProviders, string preInstallToken)
     {
+        string appName = w.AppName;
         if (allowedProviders.Count == 0) allowedProviders = [DbProvider.SqlServer];
 
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
@@ -89,11 +157,12 @@ internal static class SetupPage
         string sqFile = V("sq_file") is { Length: > 0 } sqv ? sqv : sqDefaultFile;
 
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, BuildLabels(extraLabels), 1));
+        b.Append(StepHeader(w, w.PreSteps.Count + 1));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <form method="post" action="/setup">
             <input type="hidden" name="step" value="1" />
+            <input type="hidden" name="preInstall" value="{Enc(preInstallToken)}" />
             <div class="mb-3">
               <label class="form-label text-uppercase text-secondary fw-semibold" style="font-size:.75rem;letter-spacing:.05em">
                 <i class="bi bi-database me-1"></i>Type de base de donnees
@@ -251,7 +320,7 @@ internal static class SetupPage
             })();
           </script>
         """);
-        return Wrap(appName, b.ToString());
+        return Wrap(w, b.ToString());
     }
 
     private static string ProviderOptions(IReadOnlyList<DbProvider> allowed, string selected)
@@ -277,11 +346,10 @@ internal static class SetupPage
 
     // ── Étape 2 : initialisation de la base ───────────────────────────────────
 
-    public static string RenderStep2(
-        string appName, string? error, DbProvider provider, string pendingStateToken, IReadOnlyList<string> extraLabels)
+    public static string RenderStep2(Wizard w, string? error, DbProvider provider, string pendingStateToken)
     {
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, BuildLabels(extraLabels), 2));
+        b.Append(StepHeader(w, w.PreSteps.Count + 2));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <div class="alert alert-success d-flex align-items-center py-2">
@@ -296,7 +364,7 @@ internal static class SetupPage
             </button>
           </form>
         """);
-        return Wrap(appName, b.ToString());
+        return Wrap(w, b.ToString());
     }
 
     private static string ProviderLabel(DbProvider provider) => provider switch
@@ -310,16 +378,15 @@ internal static class SetupPage
 
     // ── Étape 3 : compte administrateur ───────────────────────────────────────
 
-    public static string RenderStep3(
-        string appName, string? error, IDictionary<string, string>? values, string pendingStateToken,
-        IReadOnlyList<string> extraLabels, bool allowUsernameAdmin = false)
+    public static string RenderStep3(Wizard w, string? error, IDictionary<string, string>? values, string pendingStateToken, bool allowUsernameAdmin = false)
     {
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
-        string fieldType        = allowUsernameAdmin ? "text" : "email";
-        string fieldLabel       = allowUsernameAdmin ? "Nom d'utilisateur" : "Email";
-        string fieldPlaceholder = allowUsernameAdmin ? "admin" : "admin@exemple.com";
+        string idType        = allowUsernameAdmin ? "text" : "email";
+        string idLabel       = allowUsernameAdmin ? "Nom d'utilisateur" : "Email";
+        string idPlaceholder = allowUsernameAdmin ? "admin" : "admin@exemple.com";
+
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, BuildLabels(extraLabels), 3));
+        b.Append(StepHeader(w, w.PreSteps.Count + 3));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <form method="post" action="/setup">
@@ -329,8 +396,8 @@ internal static class SetupPage
               <i class="bi bi-shield-lock me-1"></i>Compte administrateur
             </h2>
             <div class="mb-3">
-              <label class="form-label">{fieldLabel}</label>
-              <input type="{fieldType}" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="{fieldPlaceholder}" required />
+              <label class="form-label">{idLabel}</label>
+              <input type="{idType}" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="{idPlaceholder}" required />
             </div>
             <div class="mb-3">
               <label class="form-label">Nom affiche <span class="text-secondary">(optionnel)</span></label>
@@ -348,11 +415,11 @@ internal static class SetupPage
             </div>
             <div class="form-text mb-3">8 caracteres minimum.</div>
             <button type="submit" class="btn btn-primary w-100 py-2">
-              <i class="bi bi-check2-circle me-1"></i>{(extraLabels.Count > 0 ? "Creer le compte et continuer" : "Creer le compte et terminer")}
+              <i class="bi bi-check2-circle me-1"></i>{(w.ExtraSteps.Count > 0 ? "Creer le compte et continuer" : "Creer le compte et terminer")}
             </button>
           </form>
         """);
-        return Wrap(appName, b.ToString());
+        return Wrap(w, b.ToString());
     }
 
     // ── Étapes supplémentaires (fournies par l'application hôte) ──────────────
@@ -361,59 +428,45 @@ internal static class SetupPage
     /// Habille le corps HTML produit par <see cref="ISetupExtraStep.RenderAsync"/> (logo,
     /// stepper, message d'erreur) — le formulaire lui-même (champs, bouton) est fourni tel
     /// quel par l'étape. <paramref name="extraIndex"/> est la position 1-based de l'étape
-    /// courante parmi <paramref name="extraLabels"/>.
+    /// courante parmi <see cref="Wizard.ExtraSteps"/>.
     /// </summary>
-    public static string RenderExtraStep(
-        string appName, string? error, string bodyHtml, IReadOnlyList<string> extraLabels, int extraIndex)
+    public static string RenderExtraStep(Wizard w, string? error, string bodyHtml, int extraIndex)
     {
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, BuildLabels(extraLabels), 3 + extraIndex));
+        b.Append(StepHeader(w, w.PreSteps.Count + 3 + extraIndex));
         b.Append(ErrorBlock(error));
         b.Append(bodyHtml);
-        return Wrap(appName, b.ToString());
+        return Wrap(w, b.ToString());
     }
 
     // ── Étape finale : terminé ────────────────────────────────────────────────
 
-    public static string RenderSuccess(string appName, IReadOnlyList<string> extraLabels)
+    public static string RenderSuccess(Wizard w)
     {
-        IReadOnlyList<string> labels = BuildLabels(extraLabels);
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, labels, labels.Count));
+        b.Append(StepHeader(w, w.Labels.Count));
         b.Append($"""
           <div class="text-center py-3">
             <div class="spinner-border spinner-lg text-primary mb-3" role="status"></div>
-            <h1 class="h5 text-success"><i class="bi bi-check-circle-fill me-1"></i>{Enc(appName)} installe</h1>
+            <h1 class="h5 text-success"><i class="bi bi-check-circle-fill me-1"></i>{Enc(w.AppName)} installe</h1>
             <p class="text-secondary mb-0">L'application redemarre pour charger la configuration.<br/>
                Cette page se rechargera automatiquement...</p>
           </div>
         """);
-        return Wrap(appName, b.ToString())
+        return Wrap(w, b.ToString())
             .Replace("</head>", """<meta http-equiv="refresh" content="6; url=/" /></head>""");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Liste complète des libellés du stepper : les trois étapes intégrées, suivies des
-    /// étapes supplémentaires enregistrées via <see cref="SetupExtensions.AddSetupStep{TStep}"/>
-    /// (voir <see cref="SetupService.GetExtraStepDescriptors"/>), puis l'étape finale.
-    /// </summary>
-    private static IReadOnlyList<string> BuildLabels(IReadOnlyList<string> extraLabels)
+    private static string StepHeader(Wizard w, int current)
     {
-        List<string> labels = ["Connexion", "Base", "Admin"];
-        labels.AddRange(extraLabels);
-        labels.Add("Termine");
-        return labels;
-    }
-
-    private static string StepHeader(string appName, IReadOnlyList<string> labels, int current)
-    {
+        IReadOnlyList<string> labels = w.Labels;
         StringBuilder s = new StringBuilder();
         s.Append($"""
           <div class="text-center mb-4">
             <div class="setup-logo"><i class="bi bi-gear-fill"></i></div>
-            <h1 class="h4 mb-1">{Enc(appName)}</h1>
+            <h1 class="h4 mb-1">{Enc(w.AppName)}</h1>
             <div class="text-secondary small">Assistant d'installation</div>
           </div>
           <div class="stepper">
@@ -437,8 +490,8 @@ internal static class SetupPage
               </div>
               """;
 
-    private static string Wrap(string appName, string body) =>
-        Shell.Replace("{{APP_NAME}}", Enc(appName)).Replace("{{BODY}}", body);
+    private static string Wrap(Wizard w, string body) =>
+        Shell.Replace("{{APP_NAME}}", Enc(w.AppName)).Replace("{{BODY}}", body);
 
     private static string Enc(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
 }

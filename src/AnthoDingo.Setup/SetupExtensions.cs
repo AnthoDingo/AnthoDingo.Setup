@@ -45,6 +45,18 @@ public static class SetupExtensions
     }
 
     /// <summary>
+    /// Ajoute une tâche de pré-installation (prérequis, avertissement…) affichée
+    /// par la page intégrée avant la connexion à la base. Les tâches s'enchaînent
+    /// dans l'ordre d'enregistrement.
+    /// </summary>
+    public static IServiceCollection AddSetupPreInstallTask<TTask>(this IServiceCollection services)
+        where TTask : class, ISetupPreInstallTask
+    {
+        services.AddScoped<ISetupPreInstallTask, TTask>();
+        return services;
+    }
+
+    /// <summary>
     /// Branche la garde d'installation <b>avec la page intégrée</b> servie par
     /// la bibliothèque. À appeler en tout premier dans le pipeline.
     ///

@@ -20,10 +20,10 @@
        MySQL utilise Pomelo (construit sur MySqlConnector, déjà référencé par
        AnthoDingo.Setup pour le test de connexion). -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
-	<PackageReference Include="Microting.EntityFrameworkCore.MySql" Version="10.0.10" />
+	<PackageReference Include="Microting.EntityFrameworkCore.MySql" Version="10.0.12" />
   </ItemGroup>
 
 </Project>

@@ -5,13 +5,17 @@
 Middleware d'installation « premier démarrage » pour ASP.NET Core.
 
 Tant que l'application n'est pas configurée, toute requête est redirigée vers une
-page `/setup` **fournie par la bibliothèque** (formulaire base de données + compte
-administrateur). À la validation : test de connexion → migrations/seed → création
+page `/setup` **fournie par la bibliothèque** (licence et tâches de
+pré-installation optionnelles, formulaire base de données, compte administrateur).
+À la validation : test de connexion → migrations/seed → création
 de l'admin → écriture d'un `appsettings.local.json` → redémarrage.
 
 - **4 types de base pris en charge** : SQL Server, MySQL/MariaDB, PostgreSQL et
   SQLite (fichier local). L'assistant propose un sélecteur avec les champs adaptés
   à chaque type ; l'application hôte peut restreindre la liste proposée.
+- **Licence et prérequis** (optionnels) : page licence d'utilisation, avec case
+  d'acceptation obligatoire si souhaité, et tâches de pré-installation propres à
+  l'application (vérification des prérequis, avertissement…) avant la connexion.
 - **Détection file-based** : aucun appel base de données sur chaque requête.
 - **Page intégrée hors-ligne** : Bootstrap + Bootstrap Icons sont **embarqués dans
   l'assembly** et servis sous `/setup/_assets/` — aucune dépendance à un CDN ni au
@@ -104,10 +108,44 @@ if (setup.IsSetupComplete())
 }
 ```
 
-> Pour fournir votre propre page d'installation à la place de la page intégrée,
-> utilisez `app.UseSetupGate()` (garde seule, sans page).
+### 3. (Optionnel) Licence et tâches de pré-installation
 
-### 3. (optionnel) Ajouter des étapes supplémentaires
+Avant la connexion à la base, l'assistant peut afficher une page **licence
+d'utilisation** puis une page par **tâche de pré-installation** (vérification des
+prérequis, avertissement…). Ordre : Licence → tâches (ordre d'enregistrement) →
+Connexion → Base → Admin.
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.LicenseText = File.ReadAllText("LICENSE"); // page licence + bouton « Suivant »
+    o.RequireLicenseAcceptance = true;           // case « J'accepte » obligatoire
+});
+builder.Services.AddSetupPreInstallTask<PrerequisCheck>();
+
+public sealed class PrerequisCheck : ISetupPreInstallTask
+{
+    public string Title => "Prérequis";
+
+    public Task<SetupTaskResult> ExecuteAsync(CancellationToken ct = default) =>
+        Task.FromResult(Environment.Is64BitProcess
+            ? SetupTaskResult.Ok("<p>Processus 64 bits : OK.</p>")      // bouton « Suivant »
+            : SetupTaskResult.Fail("Un processus 64 bits est requis.")); // bouton « Réessayer »
+}
+```
+
+- La tâche est exécutée à chaque affichage de sa page (et à chaque « Réessayer ») ;
+  une exception est affichée comme un échec. `Html` est inséré **sans encodage**
+  (contenu de l'application, jamais de saisie utilisateur) ; `Error` est encodé.
+- Un avertissement / disclaimer = une tâche qui renvoie toujours `SetupTaskResult.Ok(html)`.
+- La progression (licence acceptée, tâches réussies) voyage dans un jeton chiffré :
+  un POST forgé ne permet pas de sauter la licence ou un prérequis en échec.
+
+> Pour fournir votre propre page d'installation à la place de la page intégrée,
+> utilisez `app.UseSetupGate()` (garde seule, sans page). La licence et les tâches
+> de pré-installation ne concernent alors que la page intégrée.
+
+### 4. (optionnel) Ajouter des étapes supplémentaires
 
 Une application hôte peut étendre le premier paramétrage en ajoutant ses propres
 étapes, insérées dans le wizard **entre la création du compte administrateur et
@@ -158,14 +196,15 @@ donc injecter normalement un `DbContext` ou toute autre dépendance.
 
 `src/AnthoDingo.Setup.Example` est une application ASP.NET Core minimale (API +
 EF Core) qui montre l'intégration complète : implémentation d'`ISetupInitializer`,
-`AppDbContext` qui bascule entre les 4 providers EF Core, et branchement du
-middleware dans `Program.cs`.
+`AppDbContext` qui bascule entre les 4 providers EF Core, tâche de
+pré-installation `WritableContentRootCheck` (dossier de l'application accessible
+en écriture), et branchement du middleware dans `Program.cs`.
 
 ```bash
 dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
-Puis ouvrir `/setup` : choisir un type de base, tester la connexion, initialiser
+Puis ouvrir `/setup` : passer la vérification des prérequis, choisir un type de base, tester la connexion, initialiser
 le schéma, créer le compte administrateur, renseigner le nom de la société
 (étape supplémentaire de démonstration, voir `CompanySetupStep`).
 
@@ -193,6 +232,10 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 | `DbProvider` | Enum : `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Types de base proposés dans l'assistant (par défaut : les 4). |
 | `SetupOptions.AllowUsernameAdmin` | Si `true`, l'admin de l'étape 3 est identifié par un nom d'utilisateur plutôt qu'un email (par défaut `false`). |
+| `SetupOptions.LicenseText` | Texte de la licence : si renseigné, page « Licence » avec bouton « Suivant » avant la connexion (par défaut : `null`). |
+| `SetupOptions.RequireLicenseAcceptance` | Si `true`, case « J'accepte les termes de la licence » obligatoire sur la page licence (par défaut : `false`). |
+| `AddSetupPreInstallTask<TTask>()` | Ajoute une tâche de pré-installation (prérequis, avertissement…) affichée avant la connexion. |
+| `ISetupPreInstallTask` / `SetupTaskResult` | Tâche de pré-installation (`Title`, `ExecuteAsync`) et son résultat (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Personnalisation (chemin, préfixes autorisés, nom de la chaîne…). |
 
 ## Breaking change (v2.0.0)

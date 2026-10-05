@@ -63,4 +63,19 @@ public sealed class SetupOptions
     /// une adresse email est exigée.
     /// </summary>
     public bool AllowUsernameAdmin { get; set; }
+
+    /// <summary>
+    /// Texte de la licence d'utilisation. S'il est renseigné, l'assistant affiche
+    /// d'abord une page « Licence » (texte brut, retours à la ligne conservés)
+    /// avec un bouton « Suivant », avant les tâches de pré-installation et la
+    /// connexion à la base. Par défaut <c>null</c> : pas de page licence.
+    /// </summary>
+    public string? LicenseText { get; set; }
+
+    /// <summary>
+    /// Si <c>true</c> (et <see cref="LicenseText"/> renseigné), la page licence
+    /// affiche une case « J'accepte les termes de la licence » qui doit être
+    /// cochée pour continuer. Par défaut <c>false</c>.
+    /// </summary>
+    public bool RequireLicenseAcceptance { get; set; }
 }
