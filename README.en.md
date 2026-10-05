@@ -107,6 +107,53 @@ if (setup.IsSetupComplete())
 > To provide your own setup page instead of the built-in one, use
 > `app.UseSetupGate()` (gate only, no page).
 
+### 3. (optional) Add extra steps
+
+A host application can extend the initial setup by adding its own steps,
+inserted in the wizard **between admin account creation and the final
+restart** (preferences, licensing, business-specific configuration…).
+
+```csharp
+public sealed class CompanySetupStep : ISetupExtraStep
+{
+    public string Id => "company";
+    public string Label => "Company";
+
+    public Task<string> RenderAsync(SetupExtraStepContext ctx, CancellationToken ct) =>
+        Task.FromResult($"""
+          <form method="post" action="/setup">
+            <input type="hidden" name="step" value="{Id}" />
+            <input type="hidden" name="pendingState" value="{ctx.PendingStateToken}" />
+            <input type="text" class="form-control" name="companyName" required />
+            <button type="submit" class="btn btn-primary w-100">Continue</button>
+          </form>
+          """);
+
+    public async Task<SetupExtraStepResult> HandleAsync(SetupExtraStepContext ctx, IFormCollection form, CancellationToken ct)
+    {
+        string name = form["companyName"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return SetupExtraStepResult.Failure("Company name is required.");
+
+        await using AppDbContext db = AppDbContext.Create(ctx.Provider, ctx.ConnectionString);
+        db.Settings.Add(new AppSettings { CompanyName = name });
+        await db.SaveChangesAsync(ct);
+        return SetupExtraStepResult.Success();
+    }
+}
+```
+
+```csharp
+builder.Services.AddSetupStep<CompanySetupStep>();
+// Multiple calls chain in their registration order.
+```
+
+The step provides its own complete `<form>` (fields + button); the library
+only takes care of the chrome (logo, stepper, error message) and
+automatically inserts the step's `Label` into the stepper. Like
+`ISetupInitializer`, the step is resolved in a dedicated scope, so it can
+inject a `DbContext` or any other dependency normally.
+
 ## Example project
 
 `src/AnthoDingo.Setup.Example` is a minimal ASP.NET Core application (API + EF
@@ -119,7 +166,8 @@ dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
 Then open `/setup`: pick a database type, test the connection, initialize the
-schema and create the administrator account.
+schema, create the administrator account, and fill in the company name (a
+sample extra step, see `CompanySetupStep`).
 
 ## API
 
@@ -137,10 +185,14 @@ schema and create the administrator account.
 | `SetupService.BuildSqliteConnectionString(...)` | Builds a SQLite (file) connection string. |
 | `SetupService.CompleteSetup(provider, cs)` | Writes `appsettings.local.json` (`Setup:IsComplete`, `Setup:Provider`, connection string). |
 | `ISetupInitializer` | Implemented by the app: migrations + admin creation, receives the `DbProvider`. |
+| `AddSetupStep<TStep>()` | Adds an extra step (`ISetupExtraStep`) between admin creation and the restart. |
+| `ISetupExtraStep` | Extra step provided by the app: `Id`, `Label`, `RenderAsync`, `HandleAsync`. |
+| `SetupExtraStepContext` | Context passed to the step (provider, connection string, state token, error, posted values). |
+| `SetupExtraStepResult` | Result of `HandleAsync`: `Success()` or `Failure(message)`. |
 | `AdminAccount(UserName, Password, DisplayName?)` | Admin account to create. |
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
 | `SetupOptions.AllowedProviders` | Database types offered in the wizard (default: all 4). |
-| `SetupOptions.AllowUsernameAdmin` | If `true`, the admin account (step 3) is identified by a username instead of an email address (default: `false`). |
+| `SetupOptions.AllowUsernameAdmin` | If `true`, the step 3 admin is identified by a username instead of an email (default `false`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |
 
 ## Breaking change (v2.0.0)

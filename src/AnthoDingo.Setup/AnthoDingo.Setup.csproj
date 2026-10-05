@@ -7,7 +7,7 @@
     <RootNamespace>AnthoDingo.Setup</RootNamespace>
     <AssemblyName>AnthoDingo.Setup</AssemblyName>
     <PackageId>AnthoDingo.Setup</PackageId>
-    <Version>2.0.3</Version>
+    <Version>2.1.1</Version>
     <Authors>AnthoDingo</Authors>
     <Description>Middleware d'installation premier démarrage (file-based) pour ASP.NET Core, avec page /setup intégrée et assets Bootstrap embarqués (hors-ligne). Support SQL Server, MySQL/MariaDB, PostgreSQL et SQLite. Agnostique du DbContext et du modèle utilisateur via ISetupInitializer.</Description>
     <PackageProjectUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</PackageProjectUrl>

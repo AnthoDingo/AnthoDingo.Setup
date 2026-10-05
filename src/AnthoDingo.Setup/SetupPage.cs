@@ -54,7 +54,8 @@ internal static class SetupPage
     // ── Étape 1 : connexion base de données ────────────────────────────────────
 
     public static string RenderStep1(
-        string appName, string? error, IDictionary<string, string>? values, IReadOnlyList<DbProvider> allowedProviders)
+        string appName, string? error, IDictionary<string, string>? values, IReadOnlyList<DbProvider> allowedProviders,
+        IReadOnlyList<string> extraLabels)
     {
         if (allowedProviders.Count == 0) allowedProviders = [DbProvider.SqlServer];
 
@@ -88,7 +89,7 @@ internal static class SetupPage
         string sqFile = V("sq_file") is { Length: > 0 } sqv ? sqv : sqDefaultFile;
 
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, 1));
+        b.Append(StepHeader(appName, BuildLabels(extraLabels), 1));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <form method="post" action="/setup">
@@ -276,10 +277,11 @@ internal static class SetupPage
 
     // ── Étape 2 : initialisation de la base ───────────────────────────────────
 
-    public static string RenderStep2(string appName, string? error, DbProvider provider, string pendingStateToken)
+    public static string RenderStep2(
+        string appName, string? error, DbProvider provider, string pendingStateToken, IReadOnlyList<string> extraLabels)
     {
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, 2));
+        b.Append(StepHeader(appName, BuildLabels(extraLabels), 2));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <div class="alert alert-success d-flex align-items-center py-2">
@@ -308,15 +310,16 @@ internal static class SetupPage
 
     // ── Étape 3 : compte administrateur ───────────────────────────────────────
 
-    public static string RenderStep3(string appName, string? error, IDictionary<string, string>? values, string pendingStateToken, bool allowUsernameAdmin = false)
+    public static string RenderStep3(
+        string appName, string? error, IDictionary<string, string>? values, string pendingStateToken,
+        IReadOnlyList<string> extraLabels, bool allowUsernameAdmin = false)
     {
         string V(string key) => values is not null && values.TryGetValue(key, out string? v) ? Enc(v) : string.Empty;
-        string idType        = allowUsernameAdmin ? "text" : "email";
-        string idLabel       = allowUsernameAdmin ? "Nom d'utilisateur" : "Email";
-        string idPlaceholder = allowUsernameAdmin ? "admin" : "admin@exemple.com";
-
+        string fieldType        = allowUsernameAdmin ? "text" : "email";
+        string fieldLabel       = allowUsernameAdmin ? "Nom d'utilisateur" : "Email";
+        string fieldPlaceholder = allowUsernameAdmin ? "admin" : "admin@exemple.com";
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, 3));
+        b.Append(StepHeader(appName, BuildLabels(extraLabels), 3));
         b.Append(ErrorBlock(error));
         b.Append($"""
           <form method="post" action="/setup">
@@ -326,8 +329,8 @@ internal static class SetupPage
               <i class="bi bi-shield-lock me-1"></i>Compte administrateur
             </h2>
             <div class="mb-3">
-              <label class="form-label">{idLabel}</label>
-              <input type="{idType}" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="{idPlaceholder}" required />
+              <label class="form-label">{fieldLabel}</label>
+              <input type="{fieldType}" class="form-control" name="adminEmail" value="{V("adminEmail")}" placeholder="{fieldPlaceholder}" required />
             </div>
             <div class="mb-3">
               <label class="form-label">Nom affiche <span class="text-secondary">(optionnel)</span></label>
@@ -345,19 +348,38 @@ internal static class SetupPage
             </div>
             <div class="form-text mb-3">8 caracteres minimum.</div>
             <button type="submit" class="btn btn-primary w-100 py-2">
-              <i class="bi bi-check2-circle me-1"></i>Creer le compte et terminer
+              <i class="bi bi-check2-circle me-1"></i>{(extraLabels.Count > 0 ? "Creer le compte et continuer" : "Creer le compte et terminer")}
             </button>
           </form>
         """);
         return Wrap(appName, b.ToString());
     }
 
-    // ── Étape 4 : terminé ─────────────────────────────────────────────────────
+    // ── Étapes supplémentaires (fournies par l'application hôte) ──────────────
 
-    public static string RenderSuccess(string appName)
+    /// <summary>
+    /// Habille le corps HTML produit par <see cref="ISetupExtraStep.RenderAsync"/> (logo,
+    /// stepper, message d'erreur) — le formulaire lui-même (champs, bouton) est fourni tel
+    /// quel par l'étape. <paramref name="extraIndex"/> est la position 1-based de l'étape
+    /// courante parmi <paramref name="extraLabels"/>.
+    /// </summary>
+    public static string RenderExtraStep(
+        string appName, string? error, string bodyHtml, IReadOnlyList<string> extraLabels, int extraIndex)
     {
         StringBuilder b = new StringBuilder();
-        b.Append(StepHeader(appName, 4));
+        b.Append(StepHeader(appName, BuildLabels(extraLabels), 3 + extraIndex));
+        b.Append(ErrorBlock(error));
+        b.Append(bodyHtml);
+        return Wrap(appName, b.ToString());
+    }
+
+    // ── Étape finale : terminé ────────────────────────────────────────────────
+
+    public static string RenderSuccess(string appName, IReadOnlyList<string> extraLabels)
+    {
+        IReadOnlyList<string> labels = BuildLabels(extraLabels);
+        StringBuilder b = new StringBuilder();
+        b.Append(StepHeader(appName, labels, labels.Count));
         b.Append($"""
           <div class="text-center py-3">
             <div class="spinner-border spinner-lg text-primary mb-3" role="status"></div>
@@ -372,9 +394,21 @@ internal static class SetupPage
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static string StepHeader(string appName, int current)
+    /// <summary>
+    /// Liste complète des libellés du stepper : les trois étapes intégrées, suivies des
+    /// étapes supplémentaires enregistrées via <see cref="SetupExtensions.AddSetupStep{TStep}"/>
+    /// (voir <see cref="SetupService.GetExtraStepDescriptors"/>), puis l'étape finale.
+    /// </summary>
+    private static IReadOnlyList<string> BuildLabels(IReadOnlyList<string> extraLabels)
     {
-        string[] labels = ["Connexion", "Base", "Admin", "Termine"];
+        List<string> labels = ["Connexion", "Base", "Admin"];
+        labels.AddRange(extraLabels);
+        labels.Add("Termine");
+        return labels;
+    }
+
+    private static string StepHeader(string appName, IReadOnlyList<string> labels, int current)
+    {
         StringBuilder s = new StringBuilder();
         s.Append($"""
           <div class="text-center mb-4">
@@ -384,11 +418,11 @@ internal static class SetupPage
           </div>
           <div class="stepper">
         """);
-        for (int i = 1; i <= 4; i++)
+        for (int i = 1; i <= labels.Count; i++)
         {
             string cls = i == current ? "step active" : i < current ? "step done" : "step";
             string dot = i < current ? "<i class=\"bi bi-check-lg\"></i>" : i.ToString();
-            s.Append($"""<div class="{cls}"><div class="dot">{dot}</div><div class="lbl">{labels[i - 1]}</div></div>""");
+            s.Append($"""<div class="{cls}"><div class="dot">{dot}</div><div class="lbl">{Enc(labels[i - 1])}</div></div>""");
         }
         s.Append("</div>");
         return s.ToString();

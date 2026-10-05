@@ -7,6 +7,7 @@ namespace AnthoDingo.Setup.Example;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<AppSettings> Settings => Set<AppSettings>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -15,6 +16,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(u => u.Id);
             e.Property(u => u.Email).IsRequired().HasMaxLength(256);
             e.HasIndex(u => u.Email).IsUnique();
+        });
+
+        modelBuilder.Entity<AppSettings>(e =>
+        {
+            e.HasKey(s => s.Id);
+            e.Property(s => s.CompanyName).IsRequired().HasMaxLength(200);
         });
     }
 

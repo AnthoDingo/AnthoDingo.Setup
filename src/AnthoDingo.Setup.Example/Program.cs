@@ -14,6 +14,13 @@ builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 // builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 //     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
 
+// Pour identifier l'admin par un nom d'utilisateur plutôt qu'un email :
+// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o => o.AllowUsernameAdmin = true);
+
+// Étape supplémentaire : exécutée après la création du compte admin et avant le
+// redémarrage final. Plusieurs appels s'enchaînent dans l'ordre d'enregistrement.
+builder.Services.AddSetupStep<CompanySetupStep>();
+
 WebApplication app = builder.Build();
 
 // Garde + page /setup intégrée. À appeler en tout premier dans le pipeline.
