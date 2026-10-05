@@ -94,6 +94,29 @@ internal static class SetupPage
         return Wrap(w, b.ToString());
     }
 
+    // ── Préalable : étape préliminaire interactive (clé d'activation…) ────────
+
+    // fieldsHtml : champs fournis par ISetupPreStep.RenderAsync ; le formulaire, le
+    // jeton (étape courante, soumise) et le bouton sont fournis ici.
+    public static string RenderPreStep(Wizard w, int current, string title, string fieldsHtml, string token, string? error)
+    {
+        StringBuilder b = new StringBuilder();
+        b.Append(StepHeader(w, current));
+        b.Append(ErrorBlock(error));
+        b.Append($"""
+          <form method="post" action="/setup">
+            <input type="hidden" name="step" value="pre" />
+            <input type="hidden" name="preInstall" value="{Enc(token)}" />
+            <h2 class="text-uppercase text-secondary fw-semibold mb-3" style="font-size:.75rem;letter-spacing:.05em">
+              <i class="bi bi-key me-1"></i>{Enc(title)}
+            </h2>
+            <div class="mb-3">{fieldsHtml}</div>
+            <button type="submit" class="btn btn-primary w-100 py-2">Suivant <i class="bi bi-arrow-right ms-1"></i></button>
+          </form>
+        """);
+        return Wrap(w, b.ToString());
+    }
+
     // ── Préalable : tâche de pré-installation ─────────────────────────────────
 
     // token : jeton de l'étape à poster — celle d'après si la tâche a réussi

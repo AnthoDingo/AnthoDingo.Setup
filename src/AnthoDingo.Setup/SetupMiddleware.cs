@@ -50,14 +50,17 @@ public sealed class SetupMiddleware(
         // ── Page intégrée fournie par la lib ──────────────────────────────────
         if (serveBuiltInPage && isSetupPath)
         {
-            List<ISetupPreInstallTask> tasks = ctx.RequestServices.GetServices<ISetupPreInstallTask>().ToList();
+            PreInstall pre = new(
+                ctx.RequestServices.GetServices<ISetupPreStep>().ToList(),
+                ctx.RequestServices.GetServices<ISetupPreInstallTask>().ToList());
             List<string> preSteps = [];
             if (_opts.LicenseText is not null) preSteps.Add("Licence");
-            preSteps.AddRange(tasks.Select(t => t.Title));
+            preSteps.AddRange(pre.Steps.Select(st => st.Label));
+            preSteps.AddRange(pre.Tasks.Select(t => t.Title));
             SetupPage.Wizard w = new(appName, preSteps, setup.GetExtraStepDescriptors().Select(d => d.Label).ToList());
 
             if (HttpMethods.IsPost(ctx.Request.Method))
-                await HandleInstallAsync(ctx, w, tasks, setup, lifetime, logger);
+                await HandleInstallAsync(ctx, w, pre, setup, lifetime, logger);
             else
             {
                 // Un GET vers /setup ne remet plus à zéro d'état serveur : depuis
@@ -67,7 +70,7 @@ public sealed class SetupMiddleware(
                 // une sonde de monitoring / plusieurs workers ne cassent plus le
                 // wizard en cours (voir historique : "Session expiree" causé par
                 // un état conservé sur ce singleton et effacé par n'importe quel GET).
-                await StartAsync(ctx, w, tasks, setup, null);
+                await StartAsync(ctx, w, pre, setup, null);
             }
             return;
         }
@@ -86,7 +89,7 @@ public sealed class SetupMiddleware(
     // ── Traitement du wizard multi-étapes (page intégrée) ─────────────────────
 
     private async Task HandleInstallAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks,
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre,
         SetupService setup, IHostApplicationLifetime lifetime, ILogger logger)
     {
         IFormCollection form = await ctx.Request.ReadFormAsync();
@@ -95,22 +98,24 @@ public sealed class SetupMiddleware(
 
         switch (step)
         {
-            case "license": await LicenseAsync(ctx, w, tasks, setup, form); break;
+            case "license": await LicenseAsync(ctx, w, pre, setup, form); break;
             case "pre":
-                if (setup.TryUnprotectPreInstallStage(form["preInstall"], out int stage) && stage >= 0 && stage <= tasks.Count)
-                    await RunPreStageAsync(ctx, w, tasks, setup, stage);
+                if (setup.TryUnprotectPreInstallStage(form["preInstall"], out int stage) && stage >= 0 && stage <= pre.Count)
+                    await (stage < pre.Steps.Count
+                        ? PreStepSubmitAsync(ctx, w, pre, setup, form, values, stage)
+                        : RunPreStageAsync(ctx, w, pre, setup, stage));
                 else
-                    await StartAsync(ctx, w, tasks, setup, SessionExpired);
+                    await StartAsync(ctx, w, pre, setup, SessionExpired);
                 break;
-            case "1": await Step1ConnectionAsync(ctx, w, tasks, setup, form, values); break;
-            case "2": await Step2InitDbAsync(ctx, w, tasks, setup, form); break;
-            case "3": await Step3AdminAsync(ctx, w, tasks, setup, lifetime, logger, form, values); break;
+            case "1": await Step1ConnectionAsync(ctx, w, pre, setup, form, values); break;
+            case "2": await Step2InitDbAsync(ctx, w, pre, setup, form); break;
+            case "3": await Step3AdminAsync(ctx, w, pre, setup, lifetime, logger, form, values); break;
             default:
                 int extraIndex = IndexOfExtraStep(setup.GetExtraStepDescriptors(), step);
                 if (extraIndex >= 0)
-                    await StepExtraAsync(ctx, w, tasks, setup, lifetime, logger, form, values, extraIndex);
+                    await StepExtraAsync(ctx, w, pre, setup, lifetime, logger, form, values, extraIndex);
                 else
-                    await StartAsync(ctx, w, tasks, setup, null);
+                    await StartAsync(ctx, w, pre, setup, null);
                 break;
         }
     }
@@ -126,39 +131,53 @@ public sealed class SetupMiddleware(
 
     private const string SessionExpired = "Session expiree, recommencez.";
 
-    // ── Préalables : licence puis tâches de pré-installation ──────────────────
-    // Étape de pré-installation « stage » : 0..tasks.Count-1 = tâche à exécuter,
-    // tasks.Count = préalables terminés (étape 1 autorisée). Elle voyage dans un
-    // jeton chiffré (SetupService.ProtectPreInstallStage) : un POST forgé ne peut
-    // pas sauter la licence ou un prérequis en échec.
+    // ── Préalables : licence, étapes préliminaires puis tâches ────────────────
+    // Étape de pré-installation « stage » : 0..Steps.Count-1 = étape préliminaire
+    // (un POST soumet sa saisie), puis Steps.Count.. = tâche à exécuter, pre.Count =
+    // préalables terminés (étape 1 autorisée). Elle voyage dans un jeton chiffré
+    // (SetupService.ProtectPreInstallStage) : un POST forgé ne peut pas sauter la
+    // licence, une clé refusée ou un prérequis en échec.
+
+    private sealed record PreInstall(List<ISetupPreStep> Steps, List<ISetupPreInstallTask> Tasks)
+    {
+        public int Count => Steps.Count + Tasks.Count;
+    }
+
+    private int PreStageNumber(int stage) => (_opts.LicenseText is not null ? 1 : 0) + stage + 1;
 
     /// <summary>Début du wizard : licence si configurée, sinon première tâche (ou étape 1).</summary>
-    private Task StartAsync(HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup, string? error) =>
+    private Task StartAsync(HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, string? error) =>
         _opts.LicenseText is not null
             ? WriteHtmlAsync(ctx, SetupPage.RenderLicense(w, error, _opts.LicenseText, _opts.RequireLicenseAcceptance))
-            : RunPreStageAsync(ctx, w, tasks, setup, 0, error);
+            : RunPreStageAsync(ctx, w, pre, setup, 0, error);
 
     private async Task LicenseAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup, IFormCollection form)
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, IFormCollection form)
     {
         if (_opts.LicenseText is not null && _opts.RequireLicenseAcceptance && form["acceptLicense"] != "on")
         {
             await WriteHtmlAsync(ctx, SetupPage.RenderLicense(w, "Vous devez accepter la licence pour continuer.", _opts.LicenseText, true));
             return;
         }
-        await RunPreStageAsync(ctx, w, tasks, setup, 0);
+        await RunPreStageAsync(ctx, w, pre, setup, 0);
     }
 
     private async Task RunPreStageAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup, int stage, string? error = null)
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, int stage, string? error = null)
     {
-        if (stage >= tasks.Count)
+        if (stage >= pre.Count)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, error, null, _opts.AllowedProviders, setup.ProtectPreInstallStage(tasks.Count)));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, error, null, _opts.AllowedProviders, setup.ProtectPreInstallStage(pre.Count)));
             return;
         }
 
-        ISetupPreInstallTask task = tasks[stage];
+        if (stage < pre.Steps.Count)
+        {
+            await RenderPreStepAsync(ctx, w, pre, setup, stage, error, null);
+            return;
+        }
+
+        ISetupPreInstallTask task = pre.Tasks[stage - pre.Steps.Count];
         SetupTaskResult result;
         try
         {
@@ -168,19 +187,49 @@ public sealed class SetupMiddleware(
         {
             result = SetupTaskResult.Fail(ex.Message);
         }
-        int    current = (_opts.LicenseText is not null ? 1 : 0) + stage + 1;
-        string token   = setup.ProtectPreInstallStage(result.Success ? stage + 1 : stage);
-        await WriteHtmlAsync(ctx, SetupPage.RenderTask(w, current, task.Title, result, token, error));
+        string token = setup.ProtectPreInstallStage(result.Success ? stage + 1 : stage);
+        await WriteHtmlAsync(ctx, SetupPage.RenderTask(w, PreStageNumber(stage), task.Title, result, token, error));
+    }
+
+    private async Task RenderPreStepAsync(
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, int stage,
+        string? error, IDictionary<string, string>? values)
+    {
+        ISetupPreStep step = pre.Steps[stage];
+        string fields = await step.RenderAsync(new SetupPreStepContext(appName, error, values), ctx.RequestAborted);
+        await WriteHtmlAsync(ctx, SetupPage.RenderPreStep(w, PreStageNumber(stage), step.Label, fields, setup.ProtectPreInstallStage(stage), error));
+    }
+
+    private async Task PreStepSubmitAsync(
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup,
+        IFormCollection form, Dictionary<string, string> values, int stage)
+    {
+        SetupExtraStepResult result;
+        try
+        {
+            result = await pre.Steps[stage].HandleAsync(new SetupPreStepContext(appName, null, values), form, ctx.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            result = SetupExtraStepResult.Failure(ex.Message);
+        }
+
+        if (!result.IsSuccess)
+        {
+            await RenderPreStepAsync(ctx, w, pre, setup, stage, result.Error ?? "Cette etape a echoue.", values);
+            return;
+        }
+        await RunPreStageAsync(ctx, w, pre, setup, stage + 1);
     }
 
     private async Task Step1ConnectionAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks,
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre,
         SetupService setup, IFormCollection form, Dictionary<string, string> values)
     {
         string? preToken = form["preInstall"];
-        if (!setup.TryUnprotectPreInstallStage(preToken, out int stage) || stage != tasks.Count)
+        if (!setup.TryUnprotectPreInstallStage(preToken, out int stage) || stage != pre.Count)
         {
-            await StartAsync(ctx, w, tasks, setup, SessionExpired);
+            await StartAsync(ctx, w, pre, setup, SessionExpired);
             return;
         }
 
@@ -273,12 +322,12 @@ public sealed class SetupMiddleware(
     }
 
     private async Task Step2InitDbAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup, IFormCollection form)
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, IFormCollection form)
     {
         string? pendingStateToken = form["pendingState"];
         if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
-            await StartAsync(ctx, w, tasks, setup, SessionExpired);
+            await StartAsync(ctx, w, pre, setup, SessionExpired);
             return;
         }
 
@@ -296,13 +345,13 @@ public sealed class SetupMiddleware(
     }
 
     private async Task Step3AdminAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup, IHostApplicationLifetime lifetime, ILogger logger,
         IFormCollection form, Dictionary<string, string> values)
     {
         string? pendingStateToken = form["pendingState"];
         if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
-            await StartAsync(ctx, w, tasks, setup, SessionExpired);
+            await StartAsync(ctx, w, pre, setup, SessionExpired);
             return;
         }
 
@@ -349,7 +398,7 @@ public sealed class SetupMiddleware(
     }
 
     private async Task StepExtraAsync(
-        HttpContext ctx, SetupPage.Wizard w, List<ISetupPreInstallTask> tasks, SetupService setup,
+        HttpContext ctx, SetupPage.Wizard w, PreInstall pre, SetupService setup,
         IHostApplicationLifetime lifetime, ILogger logger,
         IFormCollection form, Dictionary<string, string> values, int extraIndex)
     {
@@ -358,7 +407,7 @@ public sealed class SetupMiddleware(
 
         if (!setup.TryUnprotectPendingState(pendingStateToken, out DbProvider provider, out string connectionString))
         {
-            await StartAsync(ctx, w, tasks, setup, SessionExpired);
+            await StartAsync(ctx, w, pre, setup, SessionExpired);
             return;
         }
 

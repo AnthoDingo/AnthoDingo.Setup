@@ -45,6 +45,18 @@ public static class SetupExtensions
     }
 
     /// <summary>
+    /// Ajoute une étape préliminaire interactive (clé d'activation…) affichée par la
+    /// page intégrée juste après la licence, avant les tâches de pré-installation et
+    /// la connexion. Les étapes s'enchaînent dans l'ordre d'enregistrement.
+    /// </summary>
+    public static IServiceCollection AddSetupPreStep<TStep>(this IServiceCollection services)
+        where TStep : class, ISetupPreStep
+    {
+        services.AddScoped<ISetupPreStep, TStep>();
+        return services;
+    }
+
+    /// <summary>
     /// Ajoute une tâche de pré-installation (prérequis, avertissement…) affichée
     /// par la page intégrée avant la connexion à la base. Les tâches s'enchaînent
     /// dans l'ordre d'enregistrement.

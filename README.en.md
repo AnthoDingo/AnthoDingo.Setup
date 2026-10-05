@@ -107,11 +107,12 @@ if (setup.IsSetupComplete())
 }
 ```
 
-### 3. (Optional) License and pre-install tasks
+### 3. (Optional) License, preliminary steps and pre-install tasks
 
 Before the database connection, the wizard can show a **license** page, then one
-page per **pre-install task** (prerequisite checks, disclaimer…). Order: License →
-tasks (registration order) → Connection → Database → Admin.
+page per **preliminary step** (user input: activation key…), then one page per
+**pre-install task** (prerequisite checks, disclaimer…). Order: License →
+preliminary steps → tasks (each in registration order) → Connection → Database → Admin.
 
 ```csharp
 builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
@@ -136,8 +137,31 @@ public sealed class PrerequisitesCheck : ISetupPreInstallTask
   is shown as a failure. `Html` is inserted **unencoded** (application content,
   never user input); `Error` is encoded.
 - A disclaimer is just a task that always returns `SetupTaskResult.Ok(html)`.
-- Progress (license accepted, tasks passed) travels in an encrypted token: a forged
-  POST cannot skip the license or a failing prerequisite.
+- Progress (license accepted, key validated, tasks passed) travels in an encrypted
+  token: a forged POST cannot skip the license, a rejected key or a failing prerequisite.
+
+**Preliminary step** (the wizard only moves on once the input is accepted):
+
+```csharp
+builder.Services.AddSetupPreStep<ActivationKeyStep>();
+
+public sealed class ActivationKeyStep(ILicenseServer server) : ISetupPreStep
+{
+    public string Label => "Activation";
+
+    // Fields only: the form, hidden fields and "Next" button are provided by the library.
+    public Task<string> RenderAsync(SetupPreStepContext ctx, CancellationToken ct) =>
+        Task.FromResult("""<input type="text" class="form-control" name="activationKey" required />""");
+
+    public async Task<SetupExtraStepResult> HandleAsync(SetupPreStepContext ctx, IFormCollection form, CancellationToken ct) =>
+        await server.ActivateAsync(form["activationKey"], ct)          // persist the key here if needed
+            ? SetupExtraStepResult.Success()
+            : SetupExtraStepResult.Failure("Invalid activation key."); // page shown again with the error
+}
+```
+
+- The `RenderAsync` HTML is inserted **unencoded**: encode any `ctx.Values`
+  (user input) you show again after an error.
 
 > To provide your own setup page instead of the built-in one, use
 > `app.UseSetupGate()` (gate only, no page). The license and pre-install tasks
@@ -202,7 +226,7 @@ the middleware wired up in `Program.cs`.
 dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
-Then open `/setup`: pass the prerequisite check, pick a database type, test the connection, initialize the
+Then open `/setup`: enter the demo activation key (`DEMO-1234`), pass the prerequisite check, pick a database type, test the connection, initialize the
 schema, create the administrator account, and fill in the company name (a
 sample extra step, see `CompanySetupStep`).
 
@@ -232,6 +256,8 @@ sample extra step, see `CompanySetupStep`).
 | `SetupOptions.AllowUsernameAdmin` | If `true`, the step 3 admin is identified by a username instead of an email (default `false`). |
 | `SetupOptions.LicenseText` | License text: when set, a "License" page with a "Next" button is shown before the connection step (default: `null`). |
 | `SetupOptions.RequireLicenseAcceptance` | If `true`, the license page shows a mandatory "I accept the license terms" checkbox (default: `false`). |
+| `AddSetupPreStep<TStep>()` | Adds an interactive preliminary step (activation key…) shown right after the license. |
+| `ISetupPreStep` / `SetupPreStepContext` | Preliminary step (`Label`, `RenderAsync` → HTML fields, `HandleAsync` → `SetupExtraStepResult`). |
 | `AddSetupPreInstallTask<TTask>()` | Adds a pre-install task (prerequisites, disclaimer…) shown before the connection step. |
 | `ISetupPreInstallTask` / `SetupTaskResult` | Pre-install task (`Title`, `ExecuteAsync`) and its result (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |

@@ -10,6 +10,9 @@ builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, relo
 
 builder.Services.AddFileBasedSetup<AppSetupInitializer>();
 
+// Étapes préliminaires interactives (clé d'activation…), juste après la licence.
+builder.Services.AddSetupPreStep<ActivationKeyStep>();
+
 // Tâches affichées avant la connexion à la base (prérequis, avertissement…),
 // dans l'ordre d'enregistrement.
 builder.Services.AddSetupPreInstallTask<WritableContentRootCheck>();

@@ -108,12 +108,13 @@ if (setup.IsSetupComplete())
 }
 ```
 
-### 3. (Optionnel) Licence et tâches de pré-installation
+### 3. (Optionnel) Licence, étapes préliminaires et tâches de pré-installation
 
 Avant la connexion à la base, l'assistant peut afficher une page **licence
-d'utilisation** puis une page par **tâche de pré-installation** (vérification des
-prérequis, avertissement…). Ordre : Licence → tâches (ordre d'enregistrement) →
-Connexion → Base → Admin.
+d'utilisation**, puis une page par **étape préliminaire** (saisie : clé
+d'activation…), puis une page par **tâche de pré-installation** (vérification des
+prérequis, avertissement…). Ordre : Licence → étapes préliminaires → tâches (chacune
+dans l'ordre d'enregistrement) → Connexion → Base → Admin.
 
 ```csharp
 builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
@@ -138,8 +139,32 @@ public sealed class PrerequisCheck : ISetupPreInstallTask
   une exception est affichée comme un échec. `Html` est inséré **sans encodage**
   (contenu de l'application, jamais de saisie utilisateur) ; `Error` est encodé.
 - Un avertissement / disclaimer = une tâche qui renvoie toujours `SetupTaskResult.Ok(html)`.
-- La progression (licence acceptée, tâches réussies) voyage dans un jeton chiffré :
-  un POST forgé ne permet pas de sauter la licence ou un prérequis en échec.
+- La progression (licence acceptée, clé validée, tâches réussies) voyage dans un
+  jeton chiffré : un POST forgé ne permet pas de sauter la licence, une clé refusée
+  ou un prérequis en échec.
+
+**Étape préliminaire** (l'assistant ne continue que si la saisie est validée) :
+
+```csharp
+builder.Services.AddSetupPreStep<ActivationKeyStep>();
+
+public sealed class ActivationKeyStep(ILicenseServer server) : ISetupPreStep
+{
+    public string Label => "Activation";
+
+    // Champs seulement : formulaire, champs cachés et bouton « Suivant » fournis par la lib.
+    public Task<string> RenderAsync(SetupPreStepContext ctx, CancellationToken ct) =>
+        Task.FromResult("""<input type="text" class="form-control" name="activationKey" required />""");
+
+    public async Task<SetupExtraStepResult> HandleAsync(SetupPreStepContext ctx, IFormCollection form, CancellationToken ct) =>
+        await server.ActivateAsync(form["activationKey"], ct)            // persistez la clé ici si besoin
+            ? SetupExtraStepResult.Success()
+            : SetupExtraStepResult.Failure("Clé d'activation invalide."); // page ré-affichée avec l'erreur
+}
+```
+
+- Le HTML de `RenderAsync` est inséré **sans encodage** : encodez les valeurs de
+  `ctx.Values` (saisie utilisateur) que vous ré-affichez après une erreur.
 
 > Pour fournir votre propre page d'installation à la place de la page intégrée,
 > utilisez `app.UseSetupGate()` (garde seule, sans page). La licence et les tâches
@@ -204,7 +229,7 @@ en écriture), et branchement du middleware dans `Program.cs`.
 dotnet run --project src/AnthoDingo.Setup.Example
 ```
 
-Puis ouvrir `/setup` : passer la vérification des prérequis, choisir un type de base, tester la connexion, initialiser
+Puis ouvrir `/setup` : saisir la clé d'activation de démonstration (`DEMO-1234`), passer la vérification des prérequis, choisir un type de base, tester la connexion, initialiser
 le schéma, créer le compte administrateur, renseigner le nom de la société
 (étape supplémentaire de démonstration, voir `CompanySetupStep`).
 
@@ -234,6 +259,8 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 | `SetupOptions.AllowUsernameAdmin` | Si `true`, l'admin de l'étape 3 est identifié par un nom d'utilisateur plutôt qu'un email (par défaut `false`). |
 | `SetupOptions.LicenseText` | Texte de la licence : si renseigné, page « Licence » avec bouton « Suivant » avant la connexion (par défaut : `null`). |
 | `SetupOptions.RequireLicenseAcceptance` | Si `true`, case « J'accepte les termes de la licence » obligatoire sur la page licence (par défaut : `false`). |
+| `AddSetupPreStep<TStep>()` | Ajoute une étape préliminaire interactive (clé d'activation…) affichée juste après la licence. |
+| `ISetupPreStep` / `SetupPreStepContext` | Étape préliminaire (`Label`, `RenderAsync` → champs HTML, `HandleAsync` → `SetupExtraStepResult`). |
 | `AddSetupPreInstallTask<TTask>()` | Ajoute une tâche de pré-installation (prérequis, avertissement…) affichée avant la connexion. |
 | `ISetupPreInstallTask` / `SetupTaskResult` | Tâche de pré-installation (`Title`, `ExecuteAsync`) et son résultat (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Personnalisation (chemin, préfixes autorisés, nom de la chaîne…). |
