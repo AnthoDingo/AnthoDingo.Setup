@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace AnthoDingo.Setup;
 
@@ -9,15 +10,23 @@ public static class SetupExtensions
     /// <summary>
     /// Enregistre <see cref="SetupService"/> (singleton) et l'implémentation
     /// <typeparamref name="TInitializer"/> de <see cref="ISetupInitializer"/> (scoped).
+    /// <paramref name="configure"/> doit enregistrer au moins un pilote dans
+    /// <see cref="SetupOptions.Providers"/>, sinon l'application refuse de démarrer.
     /// </summary>
     public static IServiceCollection AddFileBasedSetup<TInitializer>(
         this IServiceCollection services, Action<SetupOptions>? configure = null)
         where TInitializer : class, ISetupInitializer
     {
+        OptionsBuilder<SetupOptions> options = services.AddOptions<SetupOptions>();
         if (configure is not null)
-            services.Configure(configure);
-        else
-            services.AddOptions<SetupOptions>();
+            options.Configure(configure);
+        // Sans pilote, l'assistant ne peut pas dépasser l'étape 1 : échouer dès le démarrage.
+        options
+            .Validate(o => o.Providers.Count > 0,
+                "Aucun pilote de base de données enregistré : renseignez SetupOptions.Providers " +
+                "(p. ex. o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance) " +
+                "ou appelez o.AddDefaultProviders() (package AnthoDingo.Setup.Providers).")
+            .ValidateOnStart();
 
         services.AddScoped<ISetupInitializer, TInitializer>();
         // Idempotent (TryAdd en interne) : ne duplique rien si l'application hôte

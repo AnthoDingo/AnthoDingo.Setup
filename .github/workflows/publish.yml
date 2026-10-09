@@ -21,7 +21,9 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Pack
-        run: dotnet pack src/AnthoDingo.Setup/AnthoDingo.Setup.csproj -c Release -o out -p:Version=${GITHUB_REF_NAME#v}
+        # AnthoDingo.Setup + AnthoDingo.Setup.Providers (l'exemple n'est pas packable), même version.
+        # GeneratePackageOnBuild=false : sinon NU5026 sur le projet qui référence AnthoDingo.Setup.
+        run: dotnet pack AnthoDingo.Setup.slnx -c Release -o out -p:Version=${GITHUB_REF_NAME#v} -p:GeneratePackageOnBuild=false
 
       - name: Push to GitHub Packages
         run: dotnet nuget push "out/*.nupkg" --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate

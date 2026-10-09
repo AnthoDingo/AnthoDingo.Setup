@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AnthoDingo.Setup</RootNamespace>
+    <AssemblyName>AnthoDingo.Setup.Providers</AssemblyName>
+    <PackageId>AnthoDingo.Setup.Providers</PackageId>
+    <Authors>AnthoDingo</Authors>
+    <Description>Pilotes SQL Server, MySQL/MariaDB, PostgreSQL et SQLite pour AnthoDingo.Setup : o.AddDefaultProviders() les enregistre tous les quatre dans l'assistant d'installation.</Description>
+    <PackageProjectUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <Title>AnthoDingo.Setup.Providers</Title>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../AnthoDingo.Setup/AnthoDingo.Setup.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>

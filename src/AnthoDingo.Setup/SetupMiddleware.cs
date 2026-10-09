@@ -167,7 +167,7 @@ public sealed class SetupMiddleware(
     {
         if (stage >= pre.Count)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, error, null, _opts.AllowedProviders, setup.ProtectPreInstallStage(pre.Count)));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, error, null, _opts.Providers.Keys, setup.ProtectPreInstallStage(pre.Count)));
             return;
         }
 
@@ -233,8 +233,8 @@ public sealed class SetupMiddleware(
             return;
         }
 
-        if (!Enum.TryParse(form["dbProvider"], ignoreCase: true, out DbProvider provider) || !_opts.AllowedProviders.Contains(provider))
-            provider = _opts.AllowedProviders.Count > 0 ? _opts.AllowedProviders[0] : DbProvider.SqlServer;
+        if (!Enum.TryParse(form["dbProvider"], ignoreCase: true, out DbProvider provider) || !_opts.Providers.ContainsKey(provider))
+            provider = _opts.Providers.GetAt(0).Key;
 
         string connectionString;
         switch (provider)
@@ -250,7 +250,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur et le nom de la base sont obligatoires.", values, _opts.AllowedProviders, preToken!));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur et le nom de la base sont obligatoires.", values, _opts.Providers.Keys, preToken!));
                     return;
                 }
                 connectionString = setup.BuildSqlConnectionString(server, database, windowsAuth, user, password, trustCert);
@@ -267,7 +267,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders, preToken!));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.Providers.Keys, preToken!));
                     return;
                 }
                 connectionString = setup.BuildMySqlConnectionString(server, port, database, user!, password, trustCert);
@@ -284,7 +284,7 @@ public sealed class SetupMiddleware(
 
                 if (string.IsNullOrWhiteSpace(server) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(user))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.AllowedProviders, preToken!));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le serveur, la base et l'utilisateur sont obligatoires.", values, _opts.Providers.Keys, preToken!));
                     return;
                 }
                 connectionString = setup.BuildPostgresConnectionString(server, port, database, user!, password, trustCert);
@@ -295,21 +295,21 @@ public sealed class SetupMiddleware(
                 string file = form["sq_file"].ToString().Trim();
                 if (string.IsNullOrWhiteSpace(file))
                 {
-                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le chemin du fichier SQLite est obligatoire.", values, _opts.AllowedProviders, preToken!));
+                    await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Le chemin du fichier SQLite est obligatoire.", values, _opts.Providers.Keys, preToken!));
                     return;
                 }
                 connectionString = setup.BuildSqliteConnectionString(file);
                 break;
             }
             default:
-                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Type de base de donnees invalide.", values, _opts.AllowedProviders, preToken!));
+                await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, "Type de base de donnees invalide.", values, _opts.Providers.Keys, preToken!));
                 return;
         }
 
         string? err = await setup.TestConnectionAsync(provider, connectionString, ctx.RequestAborted);
         if (err is not null)
         {
-            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, $"Connexion echouee : {err}", values, _opts.AllowedProviders, preToken!));
+            await WriteHtmlAsync(ctx, SetupPage.RenderStep1(w, $"Connexion echouee : {err}", values, _opts.Providers.Keys, preToken!));
             return;
         }
 

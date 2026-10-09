@@ -2,5 +2,7 @@
   href: ../README.md
 - name: Guide (EN)
   href: ../README.en.md
+- name: Guide (DE)
+  href: ../README.de.md
 - name: API
   href: api/

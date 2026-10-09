@@ -1,0 +1,6 @@
+<Project>
+  <!-- Version commune à AnthoDingo.Setup et AnthoDingo.Setup.Providers. -->
+  <PropertyGroup>
+    <Version>3.0.0</Version>
+  </PropertyGroup>
+</Project>

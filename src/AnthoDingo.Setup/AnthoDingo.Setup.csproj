@@ -7,9 +7,8 @@
     <RootNamespace>AnthoDingo.Setup</RootNamespace>
     <AssemblyName>AnthoDingo.Setup</AssemblyName>
     <PackageId>AnthoDingo.Setup</PackageId>
-    <Version>2.1.3</Version>
     <Authors>AnthoDingo</Authors>
-    <Description>Middleware d'installation premier démarrage (file-based) pour ASP.NET Core, avec page /setup intégrée et assets Bootstrap embarqués (hors-ligne). Support SQL Server, MySQL/MariaDB, PostgreSQL et SQLite. Agnostique du DbContext et du modèle utilisateur via ISetupInitializer.</Description>
+    <Description>Middleware d'installation premier démarrage (file-based) pour ASP.NET Core, avec page /setup intégrée et assets Bootstrap embarqués (hors-ligne). Support SQL Server, MySQL/MariaDB, PostgreSQL et SQLite via le pilote ADO.NET fourni par l'application (aucun pilote embarqué ; voir AnthoDingo.Setup.Providers pour les quatre). Agnostique du DbContext et du modèle utilisateur via ISetupInitializer.</Description>
     <PackageProjectUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</PackageProjectUrl>
     <RepositoryUrl>https://github.com/AnthoDingo/AnthoDingo.Setup</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -21,13 +20,6 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
-    <PackageReference Include="MySqlConnector" Version="2.6.2" />
-    <PackageReference Include="Npgsql" Version="10.0.3" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
   <!-- Assets embarqués (hors-ligne) servis par le middleware sous /setup/_assets/ -->

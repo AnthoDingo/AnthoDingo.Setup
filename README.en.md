@@ -11,7 +11,9 @@ database form, administrator account). On submit: connection test → migrations
 
 - **4 supported database types**: SQL Server, MySQL/MariaDB, PostgreSQL and
   SQLite (local file). The wizard shows a selector with the fields relevant to
-  each type; the host application can restrict the list that is offered.
+  each type; the host application chooses which types are offered.
+- **No bundled driver**: the application provides the ADO.NET driver it already
+  references, or adds the `AnthoDingo.Setup.Providers` package for all four.
 - **License and prerequisites** (optional): a license page, with an optional
   mandatory acceptance checkbox, and application-specific pre-install tasks
   (prerequisite checks, disclaimer…) before the connection step.
@@ -22,22 +24,54 @@ database form, administrator account). On submit: connection test → migrations
 - **Agnostic** of the DbContext and user model via the `ISetupInitializer`
   interface.
 
-Targets: `net8.0` and `net10.0`.
+Target: `net10.0`.
 
-## Drivers used
+## Installation
 
-| Database | Driver (connection test) |
-|----------|---------------------------|
-| SQL Server | `Microsoft.Data.SqlClient` |
-| MySQL / MariaDB | `MySqlConnector` |
-| PostgreSQL | `Npgsql` |
-| SQLite | `Microsoft.Data.Sqlite` |
+```bash
+dotnet add package AnthoDingo.Setup
+# Optional: all 4 drivers (otherwise provide your own, see "Drivers")
+dotnet add package AnthoDingo.Setup.Providers
+```
 
-These drivers are only used to **test the connection** during setup. On the
-application side, use whichever EF Core provider (or other ORM) you prefer —
-see the example project, which uses `Microsoft.EntityFrameworkCore.SqlServer`,
-`Pomelo.EntityFrameworkCore.MySql` (built on MySqlConnector),
-`Npgsql.EntityFrameworkCore.PostgreSQL` and `Microsoft.EntityFrameworkCore.Sqlite`.
+| Package | Contents |
+|---------|----------|
+| `AnthoDingo.Setup` | Middleware, `/setup` wizard, `SetupService`. No database driver. |
+| `AnthoDingo.Setup.Providers` | `AnthoDingo.Setup` + the 4 drivers and `o.AddDefaultProviders()`. |
+
+## Drivers
+
+`AnthoDingo.Setup` references no driver: the wizard tests the connection and
+builds the connection string with the ADO.NET `DbProviderFactory` registered for
+each database type in `SetupOptions.Providers`. Only registered types are offered;
+the first one added is preselected. With no driver at all, the application refuses
+to start with an explicit message.
+
+| Database | `DbProvider` | Driver | Factory |
+|----------|--------------|--------|---------|
+| SQL Server | `SqlServer` | `Microsoft.Data.SqlClient` | `SqlClientFactory.Instance` |
+| MySQL / MariaDB | `MySql` | `MySqlConnector` | `MySqlConnectorFactory.Instance` |
+| PostgreSQL | `Postgres` | `Npgsql` | `NpgsqlFactory.Instance` |
+| SQLite | `Sqlite` | `Microsoft.Data.Sqlite` | `SqliteFactory.Instance` |
+
+**Option 1 — provide your own drivers** (recommended): the application's EF Core
+provider already brings the driver (e.g. `Npgsql.EntityFrameworkCore.PostgreSQL`
+→ `Npgsql`), nothing extra gets published. Only `AnthoDingo.Setup` is referenced.
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance);
+```
+
+**Option 2 — the `AnthoDingo.Setup.Providers` package**: bundles all four drivers,
+at the cost of a heavier publish output (SqlClient in particular).
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o => o.AddDefaultProviders());
+// or only some types:
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+```
 
 ## Usage
 
@@ -85,15 +119,13 @@ public static class AppDbContextFactory
 using AnthoDingo.Setup;
 
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true);
-builder.Services.AddFileBasedSetup<AppSetupInitializer>();
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance; // see "Drivers"
 
-// To restrict which database types the wizard offers (default: all 4):
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
-
-// To identify the admin account by a username instead of an email address:
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowUsernameAdmin = true);
+    // To identify the admin account by a username instead of an email address:
+    // o.AllowUsernameAdmin = true;
+});
 
 var app = builder.Build();
 
@@ -117,6 +149,7 @@ preliminary steps → tasks (each in registration order) → Connection → Data
 ```csharp
 builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 {
+    o.AddDefaultProviders();                     // or your own drivers, see "Drivers"
     o.LicenseText = File.ReadAllText("LICENSE"); // license page + "Next" button
     o.RequireLicenseAcceptance = true;           // mandatory "I accept" checkbox
 });
@@ -220,7 +253,9 @@ inject a `DbContext` or any other dependency normally.
 Core) showing the full integration: an `ISetupInitializer` implementation, an
 `AppDbContext` that switches between the 4 EF Core providers, a
 `WritableContentRootCheck` pre-install task (application folder is writable), and
-the middleware wired up in `Program.cs`.
+the middleware wired up in `Program.cs`. It registers the drivers its EF Core
+providers already bring (option 1), so it does not reference
+`AnthoDingo.Setup.Providers`.
 
 ```bash
 dotnet run --project src/AnthoDingo.Setup.Example
@@ -234,12 +269,12 @@ sample extra step, see `CompanySetupStep`).
 
 | Member | Role |
 |--------|------|
-| `AddFileBasedSetup<TInitializer>(configure?)` | Registers `SetupService` (singleton) and the initializer. |
+| `AddFileBasedSetup<TInitializer>(configure?)` | Registers `SetupService` (singleton) and the initializer; `configure` must register at least one driver. |
 | `UseSetupMiddleware(appName)` | Gate + built-in `/setup` page (the name is displayed). |
 | `UseSetupGate()` | Gate only (page provided by the application). |
 | `SetupService.IsSetupComplete()` | Reads `appsettings.local.json`. |
 | `SetupService.GetConfiguredProvider()` | Reads the `DbProvider` chosen at install time. |
-| `SetupService.TestConnectionAsync(provider, cs)` | Tests a connection (SQL Server, MySQL, PostgreSQL or SQLite). |
+| `SetupService.TestConnectionAsync(provider, cs)` | Tests a connection with the driver registered for `provider`. |
 | `SetupService.BuildSqlConnectionString(...)` | Builds a SQL Server connection string. |
 | `SetupService.BuildMySqlConnectionString(...)` | Builds a MySQL/MariaDB connection string. |
 | `SetupService.BuildPostgresConnectionString(...)` | Builds a PostgreSQL connection string. |
@@ -252,7 +287,8 @@ sample extra step, see `CompanySetupStep`).
 | `SetupExtraStepResult` | Result of `HandleAsync`: `Success()` or `Failure(message)`. |
 | `AdminAccount(UserName, Password, DisplayName?)` | Admin account to create. |
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
-| `SetupOptions.AllowedProviders` | Database types offered in the wizard (default: all 4). |
+| `SetupOptions.Providers` | Drivers (`DbProviderFactory`) of the database types offered in the wizard; at least one required. |
+| `SetupOptions.AddDefaultProviders(params DbProvider[])` | `AnthoDingo.Setup.Providers` package: registers the 4 drivers (or the ones passed in). |
 | `SetupOptions.AllowUsernameAdmin` | If `true`, the step 3 admin is identified by a username instead of an email (default `false`). |
 | `SetupOptions.LicenseText` | License text: when set, a "License" page with a "Next" button is shown before the connection step (default: `null`). |
 | `SetupOptions.RequireLicenseAcceptance` | If `true`, the license page shows a mandatory "I accept the license terms" checkbox (default: `false`). |
@@ -261,6 +297,33 @@ sample extra step, see `CompanySetupStep`).
 | `AddSetupPreInstallTask<TTask>()` | Adds a pre-install task (prerequisites, disclaimer…) shown before the connection step. |
 | `ISetupPreInstallTask` / `SetupTaskResult` | Pre-install task (`Title`, `ExecuteAsync`) and its result (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Customization (path, allowed prefixes, connection string name…). |
+
+## Breaking change (v3.0.0)
+
+`AnthoDingo.Setup` no longer bundles the SQL Server, MySQL, PostgreSQL and SQLite
+drivers, and `SetupOptions.AllowedProviders` is replaced by `SetupOptions.Providers`.
+To get the v2 behavior back: reference `AnthoDingo.Setup.Providers` and call
+`o.AddDefaultProviders()` (passing the types from the former `AllowedProviders`, if
+any). An application that used these drivers without referencing them (transitive
+dependency) must now reference them itself. The PostgreSQL connection string no
+longer contains `Trust Server Certificate`, an option with no effect since Npgsql 8.
+
+```csharp
+// v2
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
+
+// v3 — with the AnthoDingo.Setup.Providers package
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+
+// v3 — or with the drivers the application already references
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance;
+    o.Providers[DbProvider.Sqlite]   = SqliteFactory.Instance;
+});
+```
 
 ## Breaking change (v2.0.0)
 
