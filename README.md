@@ -12,7 +12,9 @@ de l'admin → écriture d'un `appsettings.local.json` → redémarrage.
 
 - **4 types de base pris en charge** : SQL Server, MySQL/MariaDB, PostgreSQL et
   SQLite (fichier local). L'assistant propose un sélecteur avec les champs adaptés
-  à chaque type ; l'application hôte peut restreindre la liste proposée.
+  à chaque type ; l'application hôte choisit les types proposés.
+- **Aucun pilote embarqué** : l'application fournit le pilote ADO.NET qu'elle
+  référence déjà, ou ajoute le package `AnthoDingo.Setup.Providers` pour les quatre.
 - **Licence et prérequis** (optionnels) : page licence d'utilisation, avec case
   d'acceptation obligatoire si souhaité, et tâches de pré-installation propres à
   l'application (vérification des prérequis, avertissement…) avant la connexion.
@@ -23,22 +25,54 @@ de l'admin → écriture d'un `appsettings.local.json` → redémarrage.
 - **Agnostique** du DbContext et du modèle utilisateur via l'interface
   `ISetupInitializer`.
 
-Cible : `net8.0` et `net10.0`.
+Cible : `net10.0`.
 
-## Pilotes utilisés
+## Installation
 
-| Base | Pilote (test de connexion) |
-|------|------------------------------|
-| SQL Server | `Microsoft.Data.SqlClient` |
-| MySQL / MariaDB | `MySqlConnector` |
-| PostgreSQL | `Npgsql` |
-| SQLite | `Microsoft.Data.Sqlite` |
+```bash
+dotnet add package AnthoDingo.Setup
+# Optionnel : les 4 pilotes (sinon, fournir les vôtres, voir « Pilotes »)
+dotnet add package AnthoDingo.Setup.Providers
+```
 
-Ces pilotes ne servent qu'à **tester la connexion** pendant l'installation. Côté
-application, utilisez le provider EF Core (ou autre ORM) de votre choix — voir le
-projet d'exemple, qui utilise `Microsoft.EntityFrameworkCore.SqlServer`,
-`Pomelo.EntityFrameworkCore.MySql` (construit sur MySqlConnector),
-`Npgsql.EntityFrameworkCore.PostgreSQL` et `Microsoft.EntityFrameworkCore.Sqlite`.
+| Package | Contenu |
+|---------|---------|
+| `AnthoDingo.Setup` | Middleware, assistant `/setup`, `SetupService`. Aucun pilote de base de données. |
+| `AnthoDingo.Setup.Providers` | `AnthoDingo.Setup` + les 4 pilotes et `o.AddDefaultProviders()`. |
+
+## Pilotes
+
+`AnthoDingo.Setup` ne référence aucun pilote : l'assistant teste la connexion et
+construit la chaîne de connexion avec le `DbProviderFactory` (ADO.NET) enregistré
+pour chaque type de base dans `SetupOptions.Providers`. Seuls les types enregistrés
+sont proposés ; le premier ajouté est présélectionné. Sans aucun pilote,
+l'application refuse de démarrer avec un message explicite.
+
+| Base | `DbProvider` | Pilote | Factory |
+|------|--------------|--------|---------|
+| SQL Server | `SqlServer` | `Microsoft.Data.SqlClient` | `SqlClientFactory.Instance` |
+| MySQL / MariaDB | `MySql` | `MySqlConnector` | `MySqlConnectorFactory.Instance` |
+| PostgreSQL | `Postgres` | `Npgsql` | `NpgsqlFactory.Instance` |
+| SQLite | `Sqlite` | `Microsoft.Data.Sqlite` | `SqliteFactory.Instance` |
+
+**Option 1 — fournir ses pilotes** (recommandé) : le provider EF Core de
+l'application apporte déjà le pilote (p. ex. `Npgsql.EntityFrameworkCore.PostgreSQL`
+→ `Npgsql`), rien de plus n'est publié. Seul `AnthoDingo.Setup` est référencé.
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance);
+```
+
+**Option 2 — package `AnthoDingo.Setup.Providers`** : embarque les quatre pilotes,
+au prix d'une publication plus lourde (SqlClient notamment).
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o => o.AddDefaultProviders());
+// ou seulement certains types :
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+```
 
 ## Utilisation
 
@@ -86,15 +120,13 @@ public static class AppDbContextFactory
 using AnthoDingo.Setup;
 
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true);
-builder.Services.AddFileBasedSetup<AppSetupInitializer>();
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance; // voir « Pilotes »
 
-// Pour restreindre les types de base proposés par l'assistant (par défaut : les 4) :
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
-
-// Pour identifier le compte admin par un nom d'utilisateur plutôt qu'un email :
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowUsernameAdmin = true);
+    // Pour identifier le compte admin par un nom d'utilisateur plutôt qu'un email :
+    // o.AllowUsernameAdmin = true;
+});
 
 var app = builder.Build();
 
@@ -119,6 +151,7 @@ dans l'ordre d'enregistrement) → Connexion → Base → Admin.
 ```csharp
 builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 {
+    o.AddDefaultProviders();                     // ou vos pilotes, voir « Pilotes »
     o.LicenseText = File.ReadAllText("LICENSE"); // page licence + bouton « Suivant »
     o.RequireLicenseAcceptance = true;           // case « J'accepte » obligatoire
 });
@@ -223,7 +256,9 @@ donc injecter normalement un `DbContext` ou toute autre dépendance.
 EF Core) qui montre l'intégration complète : implémentation d'`ISetupInitializer`,
 `AppDbContext` qui bascule entre les 4 providers EF Core, tâche de
 pré-installation `WritableContentRootCheck` (dossier de l'application accessible
-en écriture), et branchement du middleware dans `Program.cs`.
+en écriture), et branchement du middleware dans `Program.cs`. Il enregistre les
+pilotes déjà apportés par ses providers EF Core (option 1) et ne référence donc
+pas `AnthoDingo.Setup.Providers`.
 
 ```bash
 dotnet run --project src/AnthoDingo.Setup.Example
@@ -237,12 +272,12 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 
 | Membre | Rôle |
 |--------|------|
-| `AddFileBasedSetup<TInitializer>(configure?)` | Enregistre `SetupService` (singleton) et l'initialiseur. |
+| `AddFileBasedSetup<TInitializer>(configure?)` | Enregistre `SetupService` (singleton) et l'initialiseur ; `configure` doit enregistrer au moins un pilote. |
 | `UseSetupMiddleware(appName)` | Garde + page `/setup` intégrée (le nom est affiché). |
 | `UseSetupGate()` | Garde seule (page fournie par l'application). |
 | `SetupService.IsSetupComplete()` | Lit `appsettings.local.json`. |
 | `SetupService.GetConfiguredProvider()` | Lit le `DbProvider` choisi à l'installation. |
-| `SetupService.TestConnectionAsync(provider, cs)` | Teste une connexion (SQL Server, MySQL, PostgreSQL ou SQLite). |
+| `SetupService.TestConnectionAsync(provider, cs)` | Teste une connexion avec le pilote enregistré pour `provider`. |
 | `SetupService.BuildSqlConnectionString(...)` | Construit une chaîne de connexion SQL Server. |
 | `SetupService.BuildMySqlConnectionString(...)` | Construit une chaîne de connexion MySQL/MariaDB. |
 | `SetupService.BuildPostgresConnectionString(...)` | Construit une chaîne de connexion PostgreSQL. |
@@ -255,7 +290,8 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 | `SetupExtraStepResult` | Résultat de `HandleAsync` : `Success()` ou `Failure(message)`. |
 | `AdminAccount(UserName, Password, DisplayName?)` | Compte admin à créer. |
 | `DbProvider` | Enum : `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
-| `SetupOptions.AllowedProviders` | Types de base proposés dans l'assistant (par défaut : les 4). |
+| `SetupOptions.Providers` | Pilotes (`DbProviderFactory`) des types de base proposés dans l'assistant ; au moins un requis. |
+| `SetupOptions.AddDefaultProviders(params DbProvider[])` | Package `AnthoDingo.Setup.Providers` : enregistre les 4 pilotes (ou ceux passés en paramètre). |
 | `SetupOptions.AllowUsernameAdmin` | Si `true`, l'admin de l'étape 3 est identifié par un nom d'utilisateur plutôt qu'un email (par défaut `false`). |
 | `SetupOptions.LicenseText` | Texte de la licence : si renseigné, page « Licence » avec bouton « Suivant » avant la connexion (par défaut : `null`). |
 | `SetupOptions.RequireLicenseAcceptance` | Si `true`, case « J'accepte les termes de la licence » obligatoire sur la page licence (par défaut : `false`). |
@@ -264,6 +300,33 @@ le schéma, créer le compte administrateur, renseigner le nom de la société
 | `AddSetupPreInstallTask<TTask>()` | Ajoute une tâche de pré-installation (prérequis, avertissement…) affichée avant la connexion. |
 | `ISetupPreInstallTask` / `SetupTaskResult` | Tâche de pré-installation (`Title`, `ExecuteAsync`) et son résultat (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Personnalisation (chemin, préfixes autorisés, nom de la chaîne…). |
+
+## Breaking change (v3.0.0)
+
+`AnthoDingo.Setup` n'embarque plus les pilotes SQL Server, MySQL, PostgreSQL et
+SQLite, et `SetupOptions.AllowedProviders` est remplacé par `SetupOptions.Providers`.
+Pour retrouver le comportement de la v2 : référencer `AnthoDingo.Setup.Providers` et
+appeler `o.AddDefaultProviders()` (avec en paramètre les types de l'ancien
+`AllowedProviders`, le cas échéant). Une application qui utilisait ces pilotes sans
+les référencer (dépendance transitive) doit les référencer elle-même. La chaîne
+PostgreSQL ne contient plus `Trust Server Certificate`, option sans effet depuis Npgsql 8.
+
+```csharp
+// v2
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
+
+// v3 — avec le package AnthoDingo.Setup.Providers
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+
+// v3 — ou avec les pilotes déjà référencés par l'application
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance;
+    o.Providers[DbProvider.Sqlite]   = SqliteFactory.Instance;
+});
+```
 
 ## Breaking change (v2.0.0)
 

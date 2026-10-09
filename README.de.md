@@ -12,8 +12,10 @@ Anlegen des Admins → Schreiben einer `appsettings.local.json` → Neustart.
 
 - **4 unterstützte Datenbanktypen**: SQL Server, MySQL/MariaDB, PostgreSQL und
   SQLite (lokale Datei). Der Assistent zeigt eine Auswahl mit den passenden
-  Feldern für jeden Typ; die Host-Anwendung kann die angebotene Liste
-  einschränken.
+  Feldern für jeden Typ; die Host-Anwendung legt die angebotenen Typen fest.
+- **Kein mitgelieferter Treiber**: Die Anwendung stellt den ADO.NET-Treiber
+  bereit, den sie bereits referenziert, oder fügt das Paket
+  `AnthoDingo.Setup.Providers` für alle vier hinzu.
 - **Lizenz und Voraussetzungen** (optional): eine Lizenzseite, auf Wunsch mit
   verpflichtendem Zustimmungs-Kontrollkästchen, sowie anwendungsspezifische
   Vorinstallationsaufgaben (Prüfung der Voraussetzungen, Hinweis…) vor dem
@@ -25,23 +27,55 @@ Anlegen des Admins → Schreiben einer `appsettings.local.json` → Neustart.
 - **Unabhängig** vom DbContext und vom Benutzermodell über die Schnittstelle
   `ISetupInitializer`.
 
-Zielplattformen: `net8.0` und `net10.0`.
+Zielplattform: `net10.0`.
 
-## Verwendete Treiber
+## Installation
 
-| Datenbank | Treiber (Verbindungstest) |
-|-----------|---------------------------|
-| SQL Server | `Microsoft.Data.SqlClient` |
-| MySQL / MariaDB | `MySqlConnector` |
-| PostgreSQL | `Npgsql` |
-| SQLite | `Microsoft.Data.Sqlite` |
+```bash
+dotnet add package AnthoDingo.Setup
+# Optional: alle 4 Treiber (sonst eigene bereitstellen, siehe „Treiber“)
+dotnet add package AnthoDingo.Setup.Providers
+```
 
-Diese Treiber dienen nur dazu, während der Installation **die Verbindung zu
-testen**. In der Anwendung verwenden Sie den EF-Core-Provider (oder ein anderes
-ORM) Ihrer Wahl — siehe das Beispielprojekt, das
-`Microsoft.EntityFrameworkCore.SqlServer`, `Pomelo.EntityFrameworkCore.MySql`
-(basiert auf MySqlConnector), `Npgsql.EntityFrameworkCore.PostgreSQL` und
-`Microsoft.EntityFrameworkCore.Sqlite` verwendet.
+| Paket | Inhalt |
+|-------|--------|
+| `AnthoDingo.Setup` | Middleware, Assistent `/setup`, `SetupService`. Kein Datenbanktreiber. |
+| `AnthoDingo.Setup.Providers` | `AnthoDingo.Setup` + die 4 Treiber und `o.AddDefaultProviders()`. |
+
+## Treiber
+
+`AnthoDingo.Setup` referenziert keinen Treiber: Der Assistent testet die
+Verbindung und erstellt die Verbindungszeichenfolge mit der ADO.NET-
+`DbProviderFactory`, die für jeden Datenbanktyp in `SetupOptions.Providers`
+registriert ist. Nur registrierte Typen werden angeboten; der zuerst hinzugefügte
+ist vorausgewählt. Ohne Treiber verweigert die Anwendung den Start mit einer
+eindeutigen Meldung.
+
+| Datenbank | `DbProvider` | Treiber | Factory |
+|-----------|--------------|---------|---------|
+| SQL Server | `SqlServer` | `Microsoft.Data.SqlClient` | `SqlClientFactory.Instance` |
+| MySQL / MariaDB | `MySql` | `MySqlConnector` | `MySqlConnectorFactory.Instance` |
+| PostgreSQL | `Postgres` | `Npgsql` | `NpgsqlFactory.Instance` |
+| SQLite | `Sqlite` | `Microsoft.Data.Sqlite` | `SqliteFactory.Instance` |
+
+**Option 1 — eigene Treiber bereitstellen** (empfohlen): Der EF-Core-Provider der
+Anwendung bringt den Treiber bereits mit (z. B. `Npgsql.EntityFrameworkCore.PostgreSQL`
+→ `Npgsql`), es wird nichts zusätzlich veröffentlicht. Nur `AnthoDingo.Setup` wird referenziert.
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance);
+```
+
+**Option 2 — Paket `AnthoDingo.Setup.Providers`**: enthält alle vier Treiber,
+um den Preis einer größeren Veröffentlichung (insbesondere SqlClient).
+
+```csharp
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o => o.AddDefaultProviders());
+// oder nur bestimmte Typen:
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+```
 
 ## Verwendung
 
@@ -89,15 +123,13 @@ public static class AppDbContextFactory
 using AnthoDingo.Setup;
 
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true);
-builder.Services.AddFileBasedSetup<AppSetupInitializer>();
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance; // siehe „Treiber“
 
-// Um die im Assistenten angebotenen Datenbanktypen einzuschränken (Standard: alle 4):
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
-
-// Um das Admin-Konto über einen Benutzernamen statt einer E-Mail zu identifizieren:
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowUsernameAdmin = true);
+    // Um das Admin-Konto über einen Benutzernamen statt einer E-Mail zu identifizieren:
+    // o.AllowUsernameAdmin = true;
+});
 
 var app = builder.Build();
 
@@ -122,6 +154,7 @@ Registrierungsreihenfolge) → Verbindung → Datenbank → Admin.
 ```csharp
 builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
 {
+    o.AddDefaultProviders();                     // oder eigene Treiber, siehe „Treiber“
     o.LicenseText = File.ReadAllText("LICENSE"); // Lizenzseite + Schaltfläche „Weiter“
     o.RequireLicenseAcceptance = true;           // verpflichtendes Kontrollkästchen „Ich stimme zu“
 });
@@ -233,7 +266,8 @@ EF Core), die die vollständige Integration zeigt: Implementierung von
 `ISetupInitializer`, ein `AppDbContext`, der zwischen den 4 EF-Core-Providern
 umschaltet, die Vorinstallationsaufgabe `WritableContentRootCheck`
 (Anwendungsordner beschreibbar) und das Einbinden der Middleware in
-`Program.cs`.
+`Program.cs`. Es registriert die Treiber, die seine EF-Core-Provider bereits
+mitbringen (Option 1), und referenziert daher `AnthoDingo.Setup.Providers` nicht.
 
 ```bash
 dotnet run --project src/AnthoDingo.Setup.Example
@@ -248,12 +282,12 @@ den Firmennamen eintragen (zusätzlicher Demo-Schritt, siehe `CompanySetupStep`)
 
 | Member | Zweck |
 |--------|-------|
-| `AddFileBasedSetup<TInitializer>(configure?)` | Registriert `SetupService` (Singleton) und den Initializer. |
+| `AddFileBasedSetup<TInitializer>(configure?)` | Registriert `SetupService` (Singleton) und den Initializer; `configure` muss mindestens einen Treiber registrieren. |
 | `UseSetupMiddleware(appName)` | Sperre + integrierte `/setup`-Seite (der Name wird angezeigt). |
 | `UseSetupGate()` | Nur die Sperre (Seite wird von der Anwendung bereitgestellt). |
 | `SetupService.IsSetupComplete()` | Liest `appsettings.local.json`. |
 | `SetupService.GetConfiguredProvider()` | Liest den bei der Installation gewählten `DbProvider`. |
-| `SetupService.TestConnectionAsync(provider, cs)` | Testet eine Verbindung (SQL Server, MySQL, PostgreSQL oder SQLite). |
+| `SetupService.TestConnectionAsync(provider, cs)` | Testet eine Verbindung mit dem für `provider` registrierten Treiber. |
 | `SetupService.BuildSqlConnectionString(...)` | Erstellt einen SQL-Server-Connection-String. |
 | `SetupService.BuildMySqlConnectionString(...)` | Erstellt einen MySQL/MariaDB-Connection-String. |
 | `SetupService.BuildPostgresConnectionString(...)` | Erstellt einen PostgreSQL-Connection-String. |
@@ -266,7 +300,8 @@ den Firmennamen eintragen (zusätzlicher Demo-Schritt, siehe `CompanySetupStep`)
 | `SetupExtraStepResult` | Ergebnis von `HandleAsync`: `Success()` oder `Failure(message)`. |
 | `AdminAccount(UserName, Password, DisplayName?)` | Anzulegendes Admin-Konto. |
 | `DbProvider` | Enum: `SqlServer`, `MySql`, `Postgres`, `Sqlite`. |
-| `SetupOptions.AllowedProviders` | Im Assistenten angebotene Datenbanktypen (Standard: alle 4). |
+| `SetupOptions.Providers` | Treiber (`DbProviderFactory`) der im Assistenten angebotenen Datenbanktypen; mindestens einer erforderlich. |
+| `SetupOptions.AddDefaultProviders(params DbProvider[])` | Paket `AnthoDingo.Setup.Providers`: registriert die 4 Treiber (oder die übergebenen). |
 | `SetupOptions.AllowUsernameAdmin` | Bei `true` wird der Admin in Schritt 3 über einen Benutzernamen statt einer E-Mail identifiziert (Standard: `false`). |
 | `SetupOptions.LicenseText` | Lizenztext: wenn gesetzt, wird vor dem Verbindungsschritt eine Seite „Lizenz“ mit Schaltfläche „Weiter“ angezeigt (Standard: `null`). |
 | `SetupOptions.RequireLicenseAcceptance` | Bei `true` zeigt die Lizenzseite ein verpflichtendes Kontrollkästchen „Ich stimme den Lizenzbedingungen zu“ (Standard: `false`). |
@@ -275,6 +310,34 @@ den Firmennamen eintragen (zusätzlicher Demo-Schritt, siehe `CompanySetupStep`)
 | `AddSetupPreInstallTask<TTask>()` | Fügt eine Vorinstallationsaufgabe (Voraussetzungen, Hinweis…) vor dem Verbindungsschritt hinzu. |
 | `ISetupPreInstallTask` / `SetupTaskResult` | Vorinstallationsaufgabe (`Title`, `ExecuteAsync`) und ihr Ergebnis (`Ok(html)` / `Fail(error, html)`). |
 | `SetupOptions` | Anpassung (Pfad, erlaubte Präfixe, Name des Connection-Strings…). |
+
+## Breaking Change (v3.0.0)
+
+`AnthoDingo.Setup` liefert die Treiber für SQL Server, MySQL, PostgreSQL und SQLite
+nicht mehr mit, und `SetupOptions.AllowedProviders` wird durch
+`SetupOptions.Providers` ersetzt. Um das Verhalten von v2 wiederherzustellen:
+`AnthoDingo.Setup.Providers` referenzieren und `o.AddDefaultProviders()` aufrufen
+(ggf. mit den Typen aus dem früheren `AllowedProviders`). Eine Anwendung, die diese
+Treiber ohne eigene Referenz (transitive Abhängigkeit) verwendet hat, muss sie nun
+selbst referenzieren. Die PostgreSQL-Verbindungszeichenfolge enthält kein
+`Trust Server Certificate` mehr, eine Option ohne Wirkung seit Npgsql 8.
+
+```csharp
+// v2
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
+
+// v3 — mit dem Paket AnthoDingo.Setup.Providers
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+    o.AddDefaultProviders(DbProvider.Postgres, DbProvider.Sqlite));
+
+// v3 — oder mit den Treibern, die die Anwendung bereits referenziert
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance;
+    o.Providers[DbProvider.Sqlite]   = SqliteFactory.Instance;
+});
+```
 
 ## Breaking Change (v2.0.0)
 

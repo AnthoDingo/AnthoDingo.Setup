@@ -3,15 +3,11 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Data.Sqlite;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using MySqlConnector;
-using Npgsql;
 
 namespace AnthoDingo.Setup;
 
@@ -24,7 +20,8 @@ namespace AnthoDingo.Setup;
 /// Les opérations base de données (migrations, création de l'admin) sont
 /// déléguées à <see cref="ISetupInitializer"/>, résolu dans un scope dédié.
 /// Quatre types de base sont pris en charge : SQL Server, MySQL/MariaDB,
-/// PostgreSQL et SQLite (voir <see cref="DbProvider"/>).
+/// PostgreSQL et SQLite (voir <see cref="DbProvider"/>), via les pilotes
+/// enregistrés dans <see cref="SetupOptions.Providers"/>.
 /// </summary>
 public sealed class SetupService(
     IHostEnvironment            env,
@@ -186,14 +183,33 @@ public sealed class SetupService(
         }
     }
 
-    private static DbConnection CreateConnection(DbProvider provider, string connectionString) => provider switch
+    private DbConnection CreateConnection(DbProvider provider, string connectionString)
     {
-        DbProvider.SqlServer => new SqlConnection(connectionString),
-        DbProvider.MySql     => new MySqlConnection(connectionString),
-        DbProvider.Postgres  => new NpgsqlConnection(connectionString),
-        DbProvider.Sqlite    => new SqliteConnection(connectionString),
-        _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Type de base de données inconnu.")
-    };
+        DbConnection conn = Factory(provider).CreateConnection()
+            ?? throw new InvalidOperationException($"Le pilote enregistré pour {provider} ne crée pas de connexion.");
+        conn.ConnectionString = connectionString;
+        return conn;
+    }
+
+    private DbProviderFactory Factory(DbProvider provider) =>
+        _opts.Providers.TryGetValue(provider, out DbProviderFactory? factory)
+            ? factory
+            : throw new InvalidOperationException(
+                $"Aucun pilote enregistré pour {provider} : ajoutez-le à SetupOptions.Providers " +
+                "ou appelez o.AddDefaultProviders() (package AnthoDingo.Setup.Providers).");
+
+    /// <summary>
+    /// Builder de chaîne de connexion du pilote enregistré pour <paramref name="provider"/>,
+    /// renseigné par mots-clés (aucune référence au pilote) : il valide les mots-clés et
+    /// se charge de l'échappement des valeurs.
+    /// </summary>
+    private string BuildConnectionString(DbProvider provider, params (string Keyword, object Value)[] values)
+    {
+        DbConnectionStringBuilder sb = Factory(provider).CreateConnectionStringBuilder() ?? new DbConnectionStringBuilder();
+        foreach ((string keyword, object value) in values)
+            sb[keyword] = value;
+        return sb.ConnectionString;
+    }
 
     // ── Étape 2 — initialiser la base (délégué à l'application) ───────────────
 
@@ -287,58 +303,50 @@ public sealed class SetupService(
         string server, string database, bool windowsAuth,
         string? user, string? password, bool trustServerCertificate = true)
     {
-        SqlConnectionStringBuilder sb = new SqlConnectionStringBuilder
-        {
-            DataSource             = server.Trim(),
-            InitialCatalog         = database.Trim(),
-            IntegratedSecurity     = windowsAuth,
-            TrustServerCertificate = trustServerCertificate,
-            ConnectTimeout         = 10
-        };
+        List<(string, object)> values =
+        [
+            ("Data Source",              server.Trim()),
+            ("Initial Catalog",          database.Trim()),
+            ("Integrated Security",      windowsAuth),
+            ("Trust Server Certificate", trustServerCertificate),
+            ("Connect Timeout",          10)
+        ];
         if (!windowsAuth)
         {
-            sb.UserID   = user?.Trim() ?? string.Empty;
-            sb.Password = password     ?? string.Empty;
+            values.Add(("User ID",  user?.Trim() ?? string.Empty));
+            values.Add(("Password", password     ?? string.Empty));
         }
-        return sb.ConnectionString;
+        return BuildConnectionString(DbProvider.SqlServer, [.. values]);
     }
 
-    /// <summary>Construit une chaîne de connexion MySQL/MariaDB (pilote MySqlConnector).</summary>
+    /// <summary>Construit une chaîne de connexion MySQL/MariaDB.</summary>
     public string BuildMySqlConnectionString(
         string server, uint port, string database,
-        string user, string? password, bool ignoreSslErrors = true)
-    {
-        MySqlConnectionStringBuilder sb = new MySqlConnectionStringBuilder
-        {
-            Server             = server.Trim(),
-            Port               = port,
-            Database           = database.Trim(),
-            UserID             = user.Trim(),
-            Password           = password ?? string.Empty,
-            SslMode            = ignoreSslErrors ? MySqlSslMode.Preferred : MySqlSslMode.Required,
-            ConnectionTimeout  = 10
-        };
-        return sb.ConnectionString;
-    }
+        string user, string? password, bool ignoreSslErrors = true) =>
+        BuildConnectionString(DbProvider.MySql,
+            ("Server",             server.Trim()),
+            ("Port",               port),
+            ("Database",           database.Trim()),
+            ("User ID",            user.Trim()),
+            ("Password",           password ?? string.Empty),
+            ("SSL Mode",           ignoreSslErrors ? "Preferred" : "Required"),
+            ("Connection Timeout", 10));
 
-    /// <summary>Construit une chaîne de connexion PostgreSQL (pilote Npgsql).</summary>
+    /// <summary>
+    /// Construit une chaîne de connexion PostgreSQL. Avec <paramref name="ignoreSslErrors"/>,
+    /// <c>SSL Mode=Prefer</c> : SSL si disponible, sans validation du certificat.
+    /// </summary>
     public string BuildPostgresConnectionString(
         string server, int port, string database,
-        string user, string? password, bool ignoreSslErrors = true)
-    {
-        NpgsqlConnectionStringBuilder sb = new NpgsqlConnectionStringBuilder
-        {
-            Host                   = server.Trim(),
-            Port                   = port,
-            Database               = database.Trim(),
-            Username               = user.Trim(),
-            Password               = password ?? string.Empty,
-            Timeout                = 10,
-            SslMode                = ignoreSslErrors ? SslMode.Prefer : SslMode.Require,
-            TrustServerCertificate = ignoreSslErrors
-        };
-        return sb.ConnectionString;
-    }
+        string user, string? password, bool ignoreSslErrors = true) =>
+        BuildConnectionString(DbProvider.Postgres,
+            ("Host",     server.Trim()),
+            ("Port",     port),
+            ("Database", database.Trim()),
+            ("Username", user.Trim()),
+            ("Password", password ?? string.Empty),
+            ("Timeout",  10),
+            ("SSL Mode", ignoreSslErrors ? "Prefer" : "Require"));
 
     /// <summary>
     /// Construit une chaîne de connexion SQLite. <paramref name="filePath"/> peut
@@ -353,12 +361,9 @@ public sealed class SetupService(
         string? dir = Path.GetDirectoryName(resolved);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        SqliteConnectionStringBuilder sb = new SqliteConnectionStringBuilder
-        {
-            DataSource = resolved,
-            Mode       = SqliteOpenMode.ReadWriteCreate
-        };
-        return sb.ConnectionString;
+        return BuildConnectionString(DbProvider.Sqlite,
+            ("Data Source", resolved),
+            ("Mode",        "ReadWriteCreate"));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

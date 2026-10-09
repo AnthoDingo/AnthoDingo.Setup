@@ -1,3 +1,5 @@
+using System.Data.Common;
+
 namespace AnthoDingo.Setup;
 
 /// <summary>
@@ -43,18 +45,18 @@ public sealed class SetupOptions
     ];
 
     /// <summary>
-    /// Types de base de données proposés à l'étape 1 de l'assistant. Par défaut,
-    /// les quatre types pris en charge sont proposés ; l'application hôte peut
-    /// restreindre cette liste (p. ex. <c>[DbProvider.Postgres]</c> pour n'autoriser
-    /// que PostgreSQL). Le premier élément de la liste est présélectionné.
+    /// Pilotes ADO.NET des types de base proposés à l'étape 1 de l'assistant :
+    /// la bibliothèque n'embarque aucun pilote et s'en sert pour tester la
+    /// connexion et construire la chaîne de connexion. Au moins un pilote doit
+    /// être enregistré (vérifié au démarrage). Le premier ajouté est présélectionné.
+    /// <para>
+    /// Soit l'application fournit le pilote qu'elle référence déjà
+    /// (<c>o.Providers[DbProvider.Postgres] = NpgsqlFactory.Instance</c>), soit
+    /// elle référence le package <c>AnthoDingo.Setup.Providers</c> et appelle
+    /// <c>o.AddDefaultProviders()</c> pour les quatre types pris en charge.
+    /// </para>
     /// </summary>
-    public List<DbProvider> AllowedProviders { get; set; } =
-    [
-        DbProvider.SqlServer,
-        DbProvider.MySql,
-        DbProvider.Postgres,
-        DbProvider.Sqlite
-    ];
+    public OrderedDictionary<DbProvider, DbProviderFactory> Providers { get; } = new();
 
     /// <summary>
     /// Si <c>true</c>, le compte administrateur créé à l'étape 3 peut être

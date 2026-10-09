@@ -1,5 +1,9 @@
 using AnthoDingo.Setup;
 using AnthoDingo.Setup.Example;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
+using MySqlConnector;
+using Npgsql;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -8,7 +12,23 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 // (voir .gitignore).
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
 
-builder.Services.AddFileBasedSetup<AppSetupInitializer>();
+// Pilotes proposés par l'assistant : ceux que les providers EF Core de l'application
+// apportent déjà. Le premier est présélectionné. Alternative : référencer le package
+// AnthoDingo.Setup.Providers et appeler o.AddDefaultProviders().
+builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
+{
+    o.Providers[DbProvider.SqlServer] = SqlClientFactory.Instance;
+    o.Providers[DbProvider.MySql]     = MySqlConnectorFactory.Instance;
+    o.Providers[DbProvider.Postgres]  = NpgsqlFactory.Instance;
+    o.Providers[DbProvider.Sqlite]    = SqliteFactory.Instance;
+
+    // Pour identifier l'admin par un nom d'utilisateur plutôt qu'un email :
+    // o.AllowUsernameAdmin = true;
+
+    // Pour afficher une page licence (avec case à cocher obligatoire) en premier :
+    // o.LicenseText = File.ReadAllText("LICENSE");
+    // o.RequireLicenseAcceptance = true;
+});
 
 // Étapes préliminaires interactives (clé d'activation…), juste après la licence.
 builder.Services.AddSetupPreStep<ActivationKeyStep>();
@@ -17,23 +37,9 @@ builder.Services.AddSetupPreStep<ActivationKeyStep>();
 // dans l'ordre d'enregistrement.
 builder.Services.AddSetupPreInstallTask<WritableContentRootCheck>();
 
-// Pour restreindre les types de base proposés par l'assistant :
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-//     o.AllowedProviders = [DbProvider.Postgres, DbProvider.Sqlite]);
-
-// Pour identifier l'admin par un nom d'utilisateur plutôt qu'un email :
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o => o.AllowUsernameAdmin = true);
-
 // Étape supplémentaire : exécutée après la création du compte admin et avant le
 // redémarrage final. Plusieurs appels s'enchaînent dans l'ordre d'enregistrement.
 builder.Services.AddSetupStep<CompanySetupStep>();
-
-// Pour afficher une page licence (avec case à cocher obligatoire) en premier :
-// builder.Services.AddFileBasedSetup<AppSetupInitializer>(o =>
-// {
-//     o.LicenseText = File.ReadAllText("LICENSE");
-//     o.RequireLicenseAcceptance = true;
-// });
 
 WebApplication app = builder.Build();
 

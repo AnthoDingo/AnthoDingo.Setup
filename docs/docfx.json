@@ -6,6 +6,10 @@
         {
           "src": "../src/AnthoDingo.Setup",
           "files": [ "AnthoDingo.Setup.csproj" ]
+        },
+        {
+          "src": "../src/AnthoDingo.Setup.Providers",
+          "files": [ "AnthoDingo.Setup.Providers.csproj" ]
         }
       ],
       "dest": "api"
@@ -14,7 +18,7 @@
   "build": {
     "content": [
       { "files": [ "**/*.{md,yml}" ], "exclude": [ "_site/**" ] },
-      { "files": [ "README.md", "README.en.md" ], "src": ".." }
+      { "files": [ "README.md", "README.en.md", "README.de.md" ], "src": ".." }
     ],
     "resource": [
       { "files": [ "images/**" ] }
