@@ -1,0 +1,44 @@
+name: Bug report
+description: Report something that doesn't work
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happens, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Configure `AddSetup(...)` with ...
+        2. Open `/setup`
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AnthoDingo.Setup version
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Target framework
+      options: [net8.0, net10.0]
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options: [SQL Server, MySQL / MariaDB, PostgreSQL, SQLite, Not applicable]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      render: text
