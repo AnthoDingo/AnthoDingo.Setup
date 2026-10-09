@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write  # Trusted Publishing nuget.org (OIDC)
 
 jobs:
   publish:
@@ -25,5 +26,12 @@ jobs:
       - name: Push to GitHub Packages
         run: dotnet nuget push "out/*.nupkg" --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
 
+      # Clé API temporaire (1 h) obtenue via la politique Trusted Publishing de nuget.org.
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Push to nuget.org
-        run: dotnet nuget push "out/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+        run: dotnet nuget push "out/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
