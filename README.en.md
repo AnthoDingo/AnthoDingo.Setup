@@ -1,6 +1,6 @@
 # AnthoDingo.Setup
 
-*[Version française](README.md)*
+*[Version française](README.md) · [Deutsche Version](README.de.md)*
 
 First-run "setup" middleware for ASP.NET Core.
 

@@ -1,6 +1,6 @@
 # AnthoDingo.Setup
 
-*[English version](README.en.md)*
+*[English version](README.en.md) · [Deutsche Version](README.de.md)*
 
 Middleware d'installation « premier démarrage » pour ASP.NET Core.
 
